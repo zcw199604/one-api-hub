@@ -10,7 +10,7 @@ import {
   EyeSlashIcon
 } from "@heroicons/react/24/outline"
 import { useAccountData } from "../../hooks/useAccountData"
-import { fetchAccountTokens, deleteApiToken, type ApiToken } from "../../services/apiService"
+import { fetchAccountTokens, deleteApiToken, fetchTokensTodayUsage, type ApiToken, type TokenTodayUsageMap } from "../../services/apiService"
 import type { DisplaySiteData } from "../../types"
 import AddTokenDialog from "../../components/AddTokenDialog"
 import toast from 'react-hot-toast'
@@ -26,6 +26,10 @@ export default function KeyManagement({ routeParams }: { routeParams?: Record<st
   const [visibleKeys, setVisibleKeys] = useState<Set<number>>(new Set())
   const [isAddTokenOpen, setIsAddTokenOpen] = useState(false)
   const [editingToken, setEditingToken] = useState<(ApiToken & { accountName: string }) | null>(null)
+  const [tokenUsageMap, setTokenUsageMap] = useState<TokenTodayUsageMap>(new Map())
+  const [isLoadingUsage, setIsLoadingUsage] = useState(false)
+  const [sortField, setSortField] = useState<'todayUsed' | 'usedQuota'>('todayUsed')
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc')
 
   const tokenCapableAccounts = useMemo(() => {
     const registry = SiteAdapterRegistry.getInstance()
@@ -38,13 +42,15 @@ export default function KeyManagement({ routeParams }: { routeParams?: Record<st
   const loadTokens = async (accountId?: string) => {
     const targetAccountId = accountId || selectedAccount
     if (!targetAccountId || displayData.length === 0) return
-    
+
     setIsLoading(true)
+    setIsLoadingUsage(true)
     try {
       // 只加载选中账号的密钥
       const account = displayData.find(acc => acc.id === targetAccountId)
       if (!account) {
         setTokens([])
+        setTokenUsageMap(new Map())
         return
       }
 
@@ -54,33 +60,49 @@ export default function KeyManagement({ routeParams }: { routeParams?: Record<st
       if (!supportsTokenManagement) {
         toast.error("该账号不支持密钥管理")
         setTokens([])
+        setTokenUsageMap(new Map())
         return
       }
 
       if (!account.token || !account.userId) {
         toast.error("缺少访问令牌或用户 ID，无法加载密钥列表")
         setTokens([])
+        setTokenUsageMap(new Map())
         return
       }
 
-      const accountTokens = await fetchAccountTokens(
-        account.baseUrl,
-        account.userId,
-        account.token
-      )
-      
+      // 并行获取密钥列表和今日使用量
+      const [accountTokens, usageMap] = await Promise.all([
+        fetchAccountTokens(
+          account.baseUrl,
+          account.userId,
+          account.token
+        ),
+        fetchTokensTodayUsage(
+          account.baseUrl,
+          account.userId,
+          account.token
+        ).catch((error) => {
+          console.warn("获取密钥今日使用量失败:", error)
+          return new Map() as TokenTodayUsageMap
+        })
+      ])
+
       const tokensWithAccount = accountTokens.map(token => ({
         ...token,
         accountName: account.name
       }))
-      
+
       setTokens(tokensWithAccount)
+      setTokenUsageMap(usageMap)
     } catch (error) {
       console.error(`获取账号密钥失败:`, error)
       toast.error('加载密钥列表失败')
       setTokens([])
+      setTokenUsageMap(new Map())
     } finally {
       setIsLoading(false)
+      setIsLoadingUsage(false)
     }
   }
 
@@ -104,11 +126,29 @@ export default function KeyManagement({ routeParams }: { routeParams?: Record<st
     }
   }, [routeParams?.accountId, tokenCapableAccounts])
 
-  // 过滤密钥 (现在只需要搜索过滤，因为已经只加载选中账号的密钥)
-  const filteredTokens = tokens.filter(token => {
-    return token.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-           token.key.toLowerCase().includes(searchTerm.toLowerCase())
-  })
+  // 过滤和排序密钥
+  const filteredTokens = useMemo(() => {
+    // 先过滤
+    const filtered = tokens.filter(token => {
+      return token.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+             token.key.toLowerCase().includes(searchTerm.toLowerCase())
+    })
+
+    // 再排序
+    return filtered.sort((a, b) => {
+      let valueA: number, valueB: number
+
+      if (sortField === 'todayUsed') {
+        valueA = tokenUsageMap.get(a.name)?.today_quota_consumption || 0
+        valueB = tokenUsageMap.get(b.name)?.today_quota_consumption || 0
+      } else {
+        valueA = a.used_quota
+        valueB = b.used_quota
+      }
+
+      return sortOrder === 'desc' ? valueB - valueA : valueA - valueB
+    })
+  }, [tokens, searchTerm, sortField, sortOrder, tokenUsageMap])
 
   // 复制密钥
   const copyKey = async (key: string, name: string) => {
@@ -202,6 +242,13 @@ export default function KeyManagement({ routeParams }: { routeParams?: Record<st
     return `$${(quota / 500000).toFixed(2)}`
   }
 
+  // 格式化今日已用额度
+  const formatTodayUsed = (tokenName: string) => {
+    const usage = tokenUsageMap.get(tokenName)
+    if (!usage) return '$0.00'
+    return `$${(usage.today_quota_consumption / 500000).toFixed(2)}`
+  }
+
   return (
     <div className="p-6">
       {/* 页面标题 */}
@@ -251,7 +298,7 @@ export default function KeyManagement({ routeParams }: { routeParams?: Record<st
           </select>
         </div>
 
-        {/* 搜索框 */}
+        {/* 搜索框和排序 */}
         <div className="flex flex-col sm:flex-row gap-4">
           <div className="flex-1 relative">
             <MagnifyingGlassIcon className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
@@ -263,6 +310,28 @@ export default function KeyManagement({ routeParams }: { routeParams?: Record<st
               disabled={!selectedAccount}
               className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-gray-100 disabled:cursor-not-allowed"
             />
+          </div>
+          {/* 排序选择器 */}
+          <div className="flex items-center gap-2 flex-shrink-0">
+            <span className="text-sm text-gray-500 hidden sm:inline">排序:</span>
+            <select
+              value={sortField}
+              onChange={(e) => setSortField(e.target.value as 'todayUsed' | 'usedQuota')}
+              disabled={!selectedAccount}
+              className="pl-3 pr-8 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-gray-100 disabled:cursor-not-allowed text-sm bg-white appearance-none bg-[url('data:image/svg+xml;charset=UTF-8,%3csvg%20xmlns%3d%22http%3a%2f%2fwww.w3.org%2f2000%2fsvg%22%20viewBox%3d%220%200%2020%2020%22%20fill%3d%22%236b7280%22%3e%3cpath%20fill-rule%3d%22evenodd%22%20d%3d%22M5.293%207.293a1%201%200%20011.414%200L10%2010.586l3.293-3.293a1%201%200%20111.414%201.414l-4%204a1%201%200%2001-1.414%200l-4-4a1%201%200%20010-1.414z%22%20clip-rule%3d%22evenodd%22%2f%3e%3c%2fsvg%3e')] bg-[length:1.25rem_1.25rem] bg-[right_0.5rem_center] bg-no-repeat"
+            >
+              <option value="todayUsed">今日已用</option>
+              <option value="usedQuota">已用额度</option>
+            </select>
+            <button
+              onClick={() => setSortOrder(sortOrder === 'desc' ? 'asc' : 'desc')}
+              disabled={!selectedAccount}
+              className="px-3 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-gray-100 disabled:cursor-not-allowed text-sm flex items-center gap-1 bg-white"
+              title={sortOrder === 'desc' ? '降序' : '升序'}
+            >
+              {sortOrder === 'desc' ? '↓' : '↑'}
+              <span>{sortOrder === 'desc' ? '降序' : '升序'}</span>
+            </button>
           </div>
         </div>
 
@@ -357,26 +426,36 @@ export default function KeyManagement({ routeParams }: { routeParams?: Record<st
                       </div>
                     </div>
 
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-                      <div>
+                    <div className="grid grid-cols-2 sm:grid-cols-5 gap-4">
+                      <div className="whitespace-nowrap">
                         <span className="text-gray-500">剩余额度:</span>
                         <span className="ml-2 font-medium">
                           {formatQuota(token.remain_quota, token.unlimited_quota)}
                         </span>
                       </div>
-                      <div>
+                      <div className="whitespace-nowrap">
                         <span className="text-gray-500">已用额度:</span>
                         <span className="ml-2 font-medium">
                           {formatQuota(token.used_quota, false)}
                         </span>
                       </div>
-                      <div>
+                      <div className="whitespace-nowrap">
+                        <span className="text-gray-500">今日已用:</span>
+                        <span className="ml-2 font-medium text-orange-600">
+                          {isLoadingUsage ? (
+                            <span className="animate-pulse">加载中...</span>
+                          ) : (
+                            formatTodayUsed(token.name)
+                          )}
+                        </span>
+                      </div>
+                      <div className="whitespace-nowrap">
                         <span className="text-gray-500">过期时间:</span>
                         <span className="ml-2 font-medium">
                           {formatTime(token.expired_time)}
                         </span>
                       </div>
-                      <div>
+                      <div className="whitespace-nowrap">
                         <span className="text-gray-500">创建时间:</span>
                         <span className="ml-2 font-medium">
                           {formatTime(token.created_time)}

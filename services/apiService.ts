@@ -142,6 +142,7 @@ interface LogItem {
   quota?: number
   prompt_tokens?: number
   completion_tokens?: number
+  token_name?: string // 密钥名称，用于按密钥分组统计
 }
 
 // 日志响应数据
@@ -149,6 +150,17 @@ interface LogResponseData {
   items: LogItem[]
   total: number
 }
+
+// 密钥今日使用量数据
+export interface TokenTodayUsage {
+  today_quota_consumption: number
+  today_prompt_tokens: number
+  today_completion_tokens: number
+  today_requests_count: number
+}
+
+// 密钥今日使用量映射（key 为 token_name）
+export type TokenTodayUsageMap = Map<string, TokenTodayUsage>
 
 // ============= 常量定义 =============
 const REQUEST_CONFIG = {
@@ -503,6 +515,89 @@ export const fetchTodayUsage = async (
     ...aggregatedData,
     today_requests_count: totalRequestsCount
   }
+}
+
+/**
+ * 获取所有密钥的今日使用量（批量）
+ * 一次性获取今日所有日志，按 token_name 分组聚合
+ */
+export const fetchTokensTodayUsage = async (
+  baseUrl: string,
+  userId: number,
+  accessToken: string
+): Promise<TokenTodayUsageMap> => {
+  const { start: startTimestamp, end: endTimestamp } = getTodayTimestampRange()
+
+  // 用于存储每个 token 的聚合数据
+  const usageMap: TokenTodayUsageMap = new Map()
+
+  let currentPage = 1
+
+  // 循环获取所有分页数据
+  while (currentPage <= REQUEST_CONFIG.MAX_PAGES) {
+    const params = new URLSearchParams({
+      p: currentPage.toString(),
+      page_size: REQUEST_CONFIG.DEFAULT_PAGE_SIZE.toString(),
+      type: "0",
+      token_name: "", // 不过滤，获取所有密钥的日志
+      model_name: "",
+      start_timestamp: startTimestamp.toString(),
+      end_timestamp: endTimestamp.toString(),
+      group: ""
+    })
+
+    const url = `${baseUrl}/api/log/self?${params.toString()}`
+    const options = createTokenAuthRequest(userId, accessToken)
+
+    const logData = await apiRequest<LogResponseData>(
+      url,
+      options,
+      "/api/log/self"
+    )
+
+    const items = logData.items || []
+
+    // 按 token_name 分组聚合
+    for (const item of items) {
+      const tokenName = item.token_name || ""
+      if (!tokenName) continue // 跳过没有 token_name 的记录
+
+      const existing = usageMap.get(tokenName) || {
+        today_quota_consumption: 0,
+        today_prompt_tokens: 0,
+        today_completion_tokens: 0,
+        today_requests_count: 0
+      }
+
+      usageMap.set(tokenName, {
+        today_quota_consumption:
+          existing.today_quota_consumption + (item.quota || 0),
+        today_prompt_tokens:
+          existing.today_prompt_tokens + (item.prompt_tokens || 0),
+        today_completion_tokens:
+          existing.today_completion_tokens + (item.completion_tokens || 0),
+        today_requests_count: existing.today_requests_count + 1
+      })
+    }
+
+    // 检查是否还有更多数据
+    const totalPages = Math.ceil(
+      (logData.total || 0) / REQUEST_CONFIG.DEFAULT_PAGE_SIZE
+    )
+    if (currentPage >= totalPages) {
+      break
+    }
+
+    currentPage++
+  }
+
+  if (currentPage > REQUEST_CONFIG.MAX_PAGES) {
+    console.warn(
+      `达到最大分页限制(${REQUEST_CONFIG.MAX_PAGES}页)，停止获取密钥今日使用量数据`
+    )
+  }
+
+  return usageMap
 }
 
 /**
