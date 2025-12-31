@@ -59,9 +59,9 @@ function IndexPopup() {
   )
 
   // 计算数据 - 使用 useMemo 缓存
-  const totalConsumption = useMemo(() => 
-    calculateTotalConsumption(stats, accounts), 
-    [stats, accounts]
+  const totalConsumption = useMemo(() =>
+    calculateTotalConsumption(displayData),
+    [displayData]
   )
   
   const totalBalance = useMemo(() => 

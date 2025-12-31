@@ -2,7 +2,7 @@ import dayjs from "dayjs"
 import relativeTime from "dayjs/plugin/relativeTime"
 import "dayjs/locale/zh-cn"
 import { UI_CONSTANTS, CURRENCY_SYMBOLS } from "../constants/ui"
-import type { DisplaySiteData, AccountStats } from "../types"
+import type { DisplaySiteData } from "../types"
 
 // 初始化 dayjs
 dayjs.extend(relativeTime)
@@ -43,19 +43,14 @@ export const formatFullTime = (date: Date): string => {
 
 /**
  * 计算总消耗
+ * 直接使用 displayData 中已转换的值，确保各站点使用正确的 conversionFactor
  */
 export const calculateTotalConsumption = (
-  stats: AccountStats,
-  accounts: any[]
+  displayData: DisplaySiteData[]
 ) => {
-  const usdAmount = parseFloat((stats.today_total_consumption / UI_CONSTANTS.EXCHANGE_RATE.CONVERSION_FACTOR).toFixed(2))
-  const cnyAmount = parseFloat(accounts.reduce((sum, acc) => 
-    sum + ((acc.account_info.today_quota_consumption / UI_CONSTANTS.EXCHANGE_RATE.CONVERSION_FACTOR) * acc.exchange_rate), 0
-  ).toFixed(2))
-
   return {
-    USD: usdAmount,
-    CNY: cnyAmount
+    USD: parseFloat(displayData.reduce((sum, site) => sum + site.todayConsumption.USD, 0).toFixed(2)),
+    CNY: parseFloat(displayData.reduce((sum, site) => sum + site.todayConsumption.CNY, 0).toFixed(2))
   }
 }
 
