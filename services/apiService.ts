@@ -991,3 +991,105 @@ export const determineHealthStatus = (error: any): HealthCheckResult => {
     message: error?.message || "未知错误"
   }
 }
+
+// ============= API Key 额度检测 =============
+
+import type { ApiKeyQuotaInfo, BillingSubscriptionResponse } from "../types/quotaCheck"
+
+// billing/usage 接口响应类型
+interface BillingUsageResponse {
+  object: string
+  total_usage: number  // 单位是美分
+}
+
+/**
+ * 检测 API Key 额度（适用于 one-api/new-api 站点）
+ * 需要同时调用两个接口：
+ * - /v1/dashboard/billing/subscription 获取总额度
+ * - /v1/dashboard/billing/usage 获取已用额度
+ */
+export const checkApiKeyQuota = async (
+  baseUrl: string,
+  apiKey: string
+): Promise<ApiKeyQuotaInfo> => {
+  // 移除 baseUrl 末尾的斜杠
+  const normalizedBaseUrl = baseUrl.replace(/\/+$/, "")
+
+  const headers = {
+    "Content-Type": "application/json",
+    "Authorization": `Bearer ${apiKey}`
+  }
+
+  try {
+    // 并行请求两个接口
+    const [subscriptionRes, usageRes] = await Promise.all([
+      fetch(`${normalizedBaseUrl}/v1/dashboard/billing/subscription`, {
+        method: "GET",
+        headers
+      }),
+      fetch(`${normalizedBaseUrl}/v1/dashboard/billing/usage`, {
+        method: "GET",
+        headers
+      })
+    ])
+
+    // 检查 subscription 接口响应
+    if (!subscriptionRes.ok) {
+      if (subscriptionRes.status === 401) {
+        return {
+          balance: 0,
+          usedAmount: 0,
+          totalAmount: 0,
+          isValid: false,
+          errorMessage: "API Key 无效或已过期"
+        }
+      }
+      if (subscriptionRes.status === 404) {
+        return {
+          balance: 0,
+          usedAmount: 0,
+          totalAmount: 0,
+          isValid: false,
+          errorMessage: "该站点不支持额度查询接口"
+        }
+      }
+      return {
+        balance: 0,
+        usedAmount: 0,
+        totalAmount: 0,
+        isValid: false,
+        errorMessage: `请求失败: HTTP ${subscriptionRes.status}`
+      }
+    }
+
+    const subscriptionData: BillingSubscriptionResponse = await subscriptionRes.json()
+
+    // 获取总额度（hard_limit_usd = soft_limit_usd = 总额度）
+    const totalAmount = subscriptionData.hard_limit_usd || 0
+
+    // 获取已用额度（total_usage 单位是美分，需要除以 100）
+    let usedAmount = 0
+    if (usageRes.ok) {
+      const usageData: BillingUsageResponse = await usageRes.json()
+      usedAmount = (usageData.total_usage || 0) / 100
+    }
+
+    // 计算剩余余额
+    const balance = totalAmount - usedAmount
+
+    return {
+      balance,
+      usedAmount,
+      totalAmount,
+      isValid: true
+    }
+  } catch (error) {
+    return {
+      balance: 0,
+      usedAmount: 0,
+      totalAmount: 0,
+      isValid: false,
+      errorMessage: error instanceof Error ? error.message : "网络请求失败"
+    }
+  }
+}

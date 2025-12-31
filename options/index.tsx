@@ -1,11 +1,12 @@
 import "../popup/style.css"
 import { useState, useEffect } from "react"
-import { 
+import {
   CogIcon,
   CpuChipIcon,
   KeyIcon,
   ArrowPathIcon,
-  InformationCircleIcon
+  InformationCircleIcon,
+  MagnifyingGlassCircleIcon
 } from "@heroicons/react/24/outline"
 import { Toaster } from 'react-hot-toast'
 import iconImage from "../assets/icon.png"
@@ -16,6 +17,7 @@ import ModelList from "./pages/ModelList"
 import KeyManagement from "./pages/KeyManagement"
 import ImportExport from "./pages/ImportExport"
 import About from "./pages/About"
+import QuotaCheck from "./pages/QuotaCheck"
 
 // 菜单项类型定义
 interface MenuItem {
@@ -44,6 +46,12 @@ const menuItems: MenuItem[] = [
     name: '密钥管理',
     icon: KeyIcon,
     component: KeyManagement
+  },
+  {
+    id: 'quota-check',
+    name: '额度检测',
+    icon: MagnifyingGlassCircleIcon,
+    component: QuotaCheck
   },
   {
     id: 'import-export',
