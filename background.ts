@@ -35,6 +35,11 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
     return true
   }
 
+  if (request.action === "pageFetchJson") {
+    handlePageFetchJson(request, sendResponse)
+    return true
+  }
+
   // 处理自动刷新相关消息
   if (
     (request.action && request.action.startsWith("autoRefresh")) ||
@@ -91,6 +96,100 @@ async function handleCloseTempWindow(request: any, sendResponse: Function) {
     sendResponse({ success: true })
   } catch (error) {
     sendResponse({ success: false, error: error.message })
+  }
+}
+
+// 在页面上下文（MAIN world）发起请求并返回 JSON（用于需要站点 Cookie/HttpOnly 的场景）
+async function handlePageFetchJson(request: any, sendResponse: Function) {
+  const { url, requestId, fetchUrl } = request
+
+  if (!url || !requestId || !fetchUrl) {
+    sendResponse({ success: false, error: "缺少参数: url/requestId/fetchUrl" })
+    return
+  }
+
+  try {
+    // 1. 打开临时窗口（确保处于目标站点的 first-party 上下文）
+    const window = await chrome.windows.create({
+      url: url,
+      type: "popup",
+      width: 800,
+      height: 600,
+      focused: false
+    })
+
+    if (!window.id || !window.tabs?.[0]?.id) {
+      throw new Error("无法创建窗口或获取标签页")
+    }
+
+    const windowId = window.id
+    const tabId = window.tabs[0].id
+
+    tempWindows.set(requestId, windowId)
+
+    // 2. 等待页面加载完成
+    await waitForTabComplete(tabId)
+
+    // 3. 在 MAIN world 执行 fetch（携带站点 cookie）
+    const injectionResults = await chrome.scripting.executeScript({
+      target: { tabId },
+      world: "MAIN",
+      args: [fetchUrl],
+      func: async (u: string) => {
+        try {
+          const response = await fetch(u, { method: "GET", credentials: "include" })
+          const text = await response.text()
+          let data: any = null
+          try {
+            data = text ? JSON.parse(text) : null
+          } catch {
+            data = text
+          }
+          return {
+            ok: response.ok,
+            status: response.status,
+            data,
+            url: response.url
+          }
+        } catch (err: any) {
+          return {
+            ok: false,
+            status: 0,
+            error: err?.message || String(err)
+          }
+        }
+      }
+    })
+
+    const result = injectionResults?.[0]?.result as any
+    if (!result) {
+      throw new Error("脚本注入未返回结果")
+    }
+
+    if (!result.ok) {
+      const statusPart = result.status ? `HTTP ${result.status}` : "请求失败"
+      const errorPart = result.error ? `: ${result.error}` : ""
+      throw new Error(`${statusPart}${errorPart}`)
+    }
+
+    // 4. 关闭临时窗口
+    await chrome.windows.remove(windowId)
+    tempWindows.delete(requestId)
+
+    sendResponse({ success: true, data: result.data })
+  } catch (error: any) {
+    // 清理窗口
+    const windowId = tempWindows.get(requestId)
+    if (windowId) {
+      try {
+        await chrome.windows.remove(windowId)
+        tempWindows.delete(requestId)
+      } catch (cleanupError) {
+        console.log("清理窗口失败:", cleanupError)
+      }
+    }
+
+    sendResponse({ success: false, error: error?.message || "未知错误" })
   }
 }
 

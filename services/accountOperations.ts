@@ -20,111 +20,14 @@
  * 4. 保存或更新账号信息到本地存储
  * 
  * 依赖：
- * - accountStorage: 账号本地存储服务
- * - apiService: API 调用服务（获取令牌、余额等）
- * - autoDetectUtils: 错误处理工具
+ * - AccountManager: 统一调度适配器与存储
  */
 
-import { accountStorage } from "./accountStorage"
-import { fetchAccountData, getOrCreateAccessToken, fetchSiteStatus, extractDefaultExchangeRate } from "./apiService"
-import { analyzeAutoDetectError, type AutoDetectError } from "../utils/autoDetectUtils"
-import type { SiteAccount } from "../types"
-
-// 账号验证结果
-export interface AccountValidationResult {
-  success: boolean
-  data?: {
-    username: string
-    accessToken: string
-    userId: string
-    exchangeRate?: number
-  }
-  error?: string
-  detailedError?: AutoDetectError
-}
-
-// 账号保存结果
-export interface AccountSaveResult {
-  success: boolean
-  accountId?: string
-  error?: string
-}
+import { AccountManager, type AccountSaveResult, type AccountValidationResult, type ValidateAndSaveParams } from "./AccountManager"
 
 // 自动检测账号信息
-export async function autoDetectAccount(url: string): Promise<AccountValidationResult> {
-  if (!url.trim()) {
-    return { success: false, error: '站点地址不能为空' }
-  }
-
-  try {
-    // 生成唯一的请求ID
-    const requestId = `auto-detect-${Date.now()}`
-    
-    // 尝试通过 background script 自动打开窗口并获取信息
-    const response = await chrome.runtime.sendMessage({
-      action: "autoDetectSite",
-      url: url.trim(),
-      requestId: requestId
-    })
-
-    if (!response.success) {
-      const detailedError = analyzeAutoDetectError(response.error || '自动检测失败')
-      return { 
-        success: false, 
-        error: response.error || '自动检测失败，请手动输入信息或确保已在目标站点登录',
-        detailedError
-      }
-    }
-
-    const userId = response.data.userId
-    if (!userId) {
-      const detailedError = analyzeAutoDetectError('无法获取用户 ID')
-      return { 
-        success: false, 
-        error: '无法获取用户 ID',
-        detailedError
-      }
-    }
-
-    // 并行执行：获取用户信息和站点状态
-    const [tokenInfo, siteStatus] = await Promise.all([
-      getOrCreateAccessToken(url, userId),
-      fetchSiteStatus(url.trim())
-    ])
-    
-    const { username: detectedUsername, access_token } = tokenInfo
-    
-    if (!detectedUsername || !access_token) {
-      const detailedError = analyzeAutoDetectError('未能获取到用户名或访问令牌')
-      return { 
-        success: false, 
-        error: '未能获取到用户名或访问令牌',
-        detailedError
-      }
-    }
-
-    // 获取默认充值比例
-    const defaultExchangeRate = extractDefaultExchangeRate(siteStatus)
-    
-    return {
-      success: true,
-      data: {
-        username: detectedUsername,
-        accessToken: access_token,
-        userId: userId.toString(),
-        exchangeRate: defaultExchangeRate
-      }
-    }
-  } catch (error) {
-    console.error('自动识别失败:', error)
-    const detailedError = analyzeAutoDetectError(error)
-    const errorMessage = error instanceof Error ? error.message : '未知错误'
-    return { 
-      success: false, 
-      error: `自动识别失败: ${errorMessage}`,
-      detailedError
-    }
-  }
+export async function autoDetectAccount(url: string, siteType?: string): Promise<AccountValidationResult> {
+  return AccountManager.getInstance().autoDetectAccount(url, siteType)
 }
 
 // 验证并保存账号信息（用于新增）
@@ -134,55 +37,18 @@ export async function validateAndSaveAccount(
   username: string,
   accessToken: string,
   userId: string,
-  exchangeRate: string
+  exchangeRate: string,
+  siteType: string = "one-api"
 ): Promise<AccountSaveResult> {
-  // 表单验证
-  if (!siteName.trim() || !username.trim() || !accessToken.trim() || !userId.trim()) {
-    return { success: false, error: '请填写完整的账号信息' }
-  }
-
-  const parsedUserId = parseInt(userId.trim())
-  if (isNaN(parsedUserId)) {
-    return { success: false, error: '用户 ID 必须是数字' }
-  }
-
-  try {
-    // 获取账号余额和今日使用情况
-    console.log('正在获取账号数据...')
-    const freshAccountData = await fetchAccountData(url.trim(), parsedUserId, accessToken.trim())
-
-    const accountData: Omit<SiteAccount, 'id' | 'created_at' | 'updated_at'> = {
-      emoji: "", // 不再使用 emoji
-      site_name: siteName.trim(),
-      site_url: url.trim(),
-      health_status: 'healthy', // 成功获取数据说明状态正常
-      exchange_rate: parseFloat(exchangeRate) || 7.2, // 使用用户输入的汇率
-      account_info: {
-        id: parsedUserId,
-        access_token: accessToken.trim(),
-        username: username.trim(),
-        quota: freshAccountData.quota,
-        today_prompt_tokens: freshAccountData.today_prompt_tokens,
-        today_completion_tokens: freshAccountData.today_completion_tokens,
-        today_quota_consumption: freshAccountData.today_quota_consumption,
-        today_requests_count: freshAccountData.today_requests_count
-      },
-      last_sync_time: Date.now()
-    }
-    
-    const accountId = await accountStorage.addAccount(accountData)
-    console.log('账号添加成功:', { 
-      id: accountId, 
-      siteName, 
-      freshAccountData 
-    })
-    
-    return { success: true, accountId }
-  } catch (error) {
-    console.error('保存账号失败:', error)
-    const errorMessage = error instanceof Error ? error.message : '未知错误'
-    return { success: false, error: `保存失败: ${errorMessage}` }
-  }
+  return validateAndSaveAccountV2({
+    siteType,
+    url,
+    siteName,
+    username,
+    accessToken,
+    userId,
+    exchangeRate
+  })
 }
 
 // 验证并更新账号信息（用于编辑）
@@ -193,58 +59,29 @@ export async function validateAndUpdateAccount(
   username: string,
   accessToken: string,
   userId: string,
-  exchangeRate: string
+  exchangeRate: string,
+  siteType: string = "one-api"
 ): Promise<AccountSaveResult> {
-  // 表单验证
-  if (!siteName.trim() || !username.trim() || !accessToken.trim() || !userId.trim()) {
-    return { success: false, error: '请填写完整的账号信息' }
-  }
+  return validateAndUpdateAccountV2(accountId, {
+    siteType,
+    url,
+    siteName,
+    username,
+    accessToken,
+    userId,
+    exchangeRate
+  })
+}
 
-  const parsedUserId = parseInt(userId.trim())
-  if (isNaN(parsedUserId)) {
-    return { success: false, error: '用户 ID 必须是数字' }
-  }
+export async function validateAndSaveAccountV2(params: ValidateAndSaveParams): Promise<AccountSaveResult> {
+  return AccountManager.getInstance().validateAndSaveAccount(params)
+}
 
-  try {
-    // 获取账号余额和今日使用情况
-    console.log('正在获取账号数据...')
-    const freshAccountData = await fetchAccountData(url.trim(), parsedUserId, accessToken.trim())
-
-    const updateData: Partial<Omit<SiteAccount, 'id' | 'created_at'>> = {
-      site_name: siteName.trim(),
-      site_url: url.trim(),
-      health_status: 'healthy', // 成功获取数据说明状态正常
-      exchange_rate: parseFloat(exchangeRate) || 7.2, // 使用用户输入的汇率
-      account_info: {
-        id: parsedUserId,
-        access_token: accessToken.trim(),
-        username: username.trim(),
-        quota: freshAccountData.quota,
-        today_prompt_tokens: freshAccountData.today_prompt_tokens,
-        today_completion_tokens: freshAccountData.today_completion_tokens,
-        today_quota_consumption: freshAccountData.today_quota_consumption,
-        today_requests_count: freshAccountData.today_requests_count
-      },
-      last_sync_time: Date.now()
-    }
-    
-    const success = await accountStorage.updateAccount(accountId, updateData)
-    if (!success) {
-      return { success: false, error: '更新账号失败' }
-    }
-    
-    console.log('账号更新成功:', { 
-      id: accountId, 
-      siteName, 
-      freshAccountData 
-    })
-    
-    return { success: true, accountId }
-  } catch (error) {
-    console.error('更新账号失败:', error)
-    const errorMessage = error instanceof Error ? error.message : '未知错误'
-    return { success: false, error: `更新失败: ${errorMessage}` }
-  }
+export async function validateAndUpdateAccountV2(
+  accountId: string,
+  params: ValidateAndSaveParams
+): Promise<AccountSaveResult> {
+  return AccountManager.getInstance().validateAndUpdateAccount(accountId, params)
 }
 
 // 提取域名的主要部分（一级域名前缀）

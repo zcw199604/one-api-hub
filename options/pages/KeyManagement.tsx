@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react"
+import { useState, useEffect, useMemo } from "react"
 import { 
   KeyIcon, 
   MagnifyingGlassIcon, 
@@ -14,6 +14,8 @@ import { fetchAccountTokens, deleteApiToken, type ApiToken } from "../../service
 import type { DisplaySiteData } from "../../types"
 import AddTokenDialog from "../../components/AddTokenDialog"
 import toast from 'react-hot-toast'
+import { SiteAdapterRegistry } from "../../adapters/SiteAdapterRegistry"
+import { AdapterCapability } from "../../adapters/types"
 
 export default function KeyManagement({ routeParams }: { routeParams?: Record<string, string> }) {
   const { displayData } = useAccountData()
@@ -25,6 +27,13 @@ export default function KeyManagement({ routeParams }: { routeParams?: Record<st
   const [isAddTokenOpen, setIsAddTokenOpen] = useState(false)
   const [editingToken, setEditingToken] = useState<(ApiToken & { accountName: string }) | null>(null)
 
+  const tokenCapableAccounts = useMemo(() => {
+    const registry = SiteAdapterRegistry.getInstance()
+    return displayData.filter((acc) =>
+      registry.getAdapter(acc.siteType)?.metadata.capabilities.includes(AdapterCapability.TOKEN_MANAGEMENT)
+    )
+  }, [displayData])
+
   // 加载选中账号的密钥
   const loadTokens = async (accountId?: string) => {
     const targetAccountId = accountId || selectedAccount
@@ -35,6 +44,21 @@ export default function KeyManagement({ routeParams }: { routeParams?: Record<st
       // 只加载选中账号的密钥
       const account = displayData.find(acc => acc.id === targetAccountId)
       if (!account) {
+        setTokens([])
+        return
+      }
+
+      const adapter = SiteAdapterRegistry.getInstance().getAdapter(account.siteType)
+      const supportsTokenManagement =
+        adapter?.metadata.capabilities.includes(AdapterCapability.TOKEN_MANAGEMENT) ?? false
+      if (!supportsTokenManagement) {
+        toast.error("该账号不支持密钥管理")
+        setTokens([])
+        return
+      }
+
+      if (!account.token || !account.userId) {
+        toast.error("缺少访问令牌或用户 ID，无法加载密钥列表")
         setTokens([])
         return
       }
@@ -71,14 +95,14 @@ export default function KeyManagement({ routeParams }: { routeParams?: Record<st
 
   // 处理路由参数中的账号ID
   useEffect(() => {
-    if (routeParams?.accountId && displayData.length > 0) {
+    if (routeParams?.accountId && tokenCapableAccounts.length > 0) {
       // 验证账号ID是否存在
-      const accountExists = displayData.some(acc => acc.id === routeParams.accountId)
+      const accountExists = tokenCapableAccounts.some(acc => acc.id === routeParams.accountId)
       if (accountExists) {
         setSelectedAccount(routeParams.accountId)
       }
     }
-  }, [routeParams?.accountId, displayData])
+  }, [routeParams?.accountId, tokenCapableAccounts])
 
   // 过滤密钥 (现在只需要搜索过滤，因为已经只加载选中账号的密钥)
   const filteredTokens = tokens.filter(token => {
@@ -221,7 +245,7 @@ export default function KeyManagement({ routeParams }: { routeParams?: Record<st
             className="w-full sm:w-80 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
           >
             <option value="">请选择账号</option>
-            {displayData.map(account => (
+            {tokenCapableAccounts.map(account => (
               <option key={account.id} value={account.id}>{account.name}</option>
             ))}
           </select>
@@ -418,7 +442,7 @@ export default function KeyManagement({ routeParams }: { routeParams?: Record<st
       <AddTokenDialog
         isOpen={isAddTokenOpen}
         onClose={handleCloseAddToken}
-        availableAccounts={displayData.map(account => ({
+        availableAccounts={tokenCapableAccounts.map(account => ({
           id: account.id,
           name: account.name,
           baseUrl: account.baseUrl,

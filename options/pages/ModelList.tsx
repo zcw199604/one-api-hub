@@ -16,6 +16,8 @@ import {
   type ModelPricing, 
   type PricingResponse 
 } from "../../services/apiService"
+import { SiteAdapterRegistry } from "../../adapters/SiteAdapterRegistry"
+import { AdapterCapability } from "../../adapters/types"
 import {
   getAllProviders,
   filterModelsByProvider,
@@ -49,6 +51,13 @@ export default function ModelList({ routeParams }: { routeParams?: Record<string
   
   // 安全获取账号数据
   const safeDisplayData = displayData || []
+
+  const pricingCapableAccounts = useMemo(() => {
+    const registry = SiteAdapterRegistry.getInstance()
+    return safeDisplayData.filter((acc) =>
+      registry.getAdapter(acc.siteType)?.metadata.capabilities.includes(AdapterCapability.MODEL_PRICING)
+    )
+  }, [safeDisplayData])
   
   // 获取当前选中的账号信息
   const currentAccount = safeDisplayData.find(acc => acc.id === selectedAccount)
@@ -101,6 +110,22 @@ export default function ModelList({ routeParams }: { routeParams?: Record<string
     setIsLoading(true)
     setDataFormatError(false)
     try {
+      const adapter = SiteAdapterRegistry.getInstance().getAdapter(account.siteType)
+      const supportsPricing =
+        adapter?.metadata.capabilities.includes(AdapterCapability.MODEL_PRICING) ?? false
+      if (!supportsPricing) {
+        toast.error("该账号不支持模型定价查询")
+        setPricingData(null)
+        setDataFormatError(false)
+        return
+      }
+
+      if (!account.token || !account.userId) {
+        toast.error("缺少访问令牌或用户 ID，无法加载模型数据")
+        setPricingData(null)
+        return
+      }
+
       const data = await fetchModelPricing(account.baseUrl, account.userId, account.token)
       console.log('API 响应数据:', data)
       console.log('模型数据:', data.data)
@@ -139,14 +164,14 @@ export default function ModelList({ routeParams }: { routeParams?: Record<string
   
   // 处理路由参数中的账号ID
   useEffect(() => {
-    if (routeParams?.accountId && safeDisplayData.length > 0) {
+    if (routeParams?.accountId && pricingCapableAccounts.length > 0) {
       // 验证账号ID是否存在
-      const accountExists = safeDisplayData.some(acc => acc.id === routeParams.accountId)
+      const accountExists = pricingCapableAccounts.some(acc => acc.id === routeParams.accountId)
       if (accountExists) {
         setSelectedAccount(routeParams.accountId)
       }
     }
-  }, [routeParams?.accountId, safeDisplayData])
+  }, [routeParams?.accountId, pricingCapableAccounts])
   
   // 当定价数据加载完成时，自动选择合适的分组
   useEffect(() => {
@@ -322,7 +347,7 @@ export default function ModelList({ routeParams }: { routeParams?: Record<string
           className="w-full sm:w-80 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
         >
           <option value="">请选择账号</option>
-          {safeDisplayData.map(account => (
+          {pricingCapableAccounts.map(account => (
             <option key={account.id} value={account.id}>{account.name}</option>
           ))}
         </select>

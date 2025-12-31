@@ -15,6 +15,8 @@ import {
 import { UI_CONSTANTS } from "../constants/ui"
 import { fetchAccountTokens, type ApiToken } from "../services/apiService"
 import type { DisplaySiteData } from "../types"
+import { SiteAdapterRegistry } from "../adapters/SiteAdapterRegistry"
+import { AdapterCapability } from "../adapters/types"
 
 interface CopyKeyDialogProps {
   isOpen: boolean
@@ -37,6 +39,21 @@ export default function CopyKeyDialog({ isOpen, onClose, account }: CopyKeyDialo
     setError(null)
     
     try {
+      const adapter = SiteAdapterRegistry.getInstance().getAdapter(account.siteType)
+      const supportsTokenManagement =
+        adapter?.metadata.capabilities.includes(AdapterCapability.TOKEN_MANAGEMENT) ?? false
+      if (!supportsTokenManagement) {
+        setError("该账号不支持密钥管理")
+        setTokens([])
+        return
+      }
+
+      if (!account.token || !account.userId) {
+        setError("缺少访问令牌或用户 ID，无法获取密钥列表")
+        setTokens([])
+        return
+      }
+
       // 使用 DisplaySiteData 中的 userId 字段
       const tokensResponse = await fetchAccountTokens(account.baseUrl, account.userId, account.token)
       

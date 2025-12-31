@@ -5,14 +5,16 @@ export type SiteHealthStatus = 'healthy' | 'warning' | 'error' | 'unknown';
 
 // 账号基础信息
 export interface AccountInfo {
-  id: number; // 账号 ID（整数）
-  access_token: string;
-  username: string;
+  id?: number | string; // 账号 ID（one-api 为 userId；其他站点可能没有或为字符串）
+  access_token?: string;
+  api_key?: string;
+  username?: string;
   quota: number; // 总余额点数
   today_prompt_tokens: number; // 今日 prompt_tokens
   today_completion_tokens: number; // 今日 completion_tokens
   today_quota_consumption: number; // 今日消耗 quota
   today_requests_count: number; // 今日请求次数
+  extra?: Record<string, any>; // 适配器扩展字段（可选）
 }
 
 // 站点账号完整信息
@@ -21,6 +23,8 @@ export interface SiteAccount {
   emoji: string; // 此项 emoji
   site_name: string; // 站点名称
   site_url: string; // 站点 url
+  site_type?: string; // 站点类型（适配器路由）
+  adapter_config?: Record<string, any>; // 适配器配置（可选）
   health_status: SiteHealthStatus; // 站点健康状态
   exchange_rate: number; // 人民币与美元充值比例 (CNY per USD)
   account_info: AccountInfo; // 账号信息
@@ -64,6 +68,7 @@ export interface DisplaySiteData {
   icon: string;
   name: string;
   username: string;
+  siteType: string; // 站点类型（用于能力判断/路由到适配器）
   balance: { USD: number; CNY: number };
   todayConsumption: { USD: number; CNY: number };
   todayTokens: { upload: number; download: number };

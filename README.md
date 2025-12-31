@@ -41,6 +41,50 @@
 - 🤖 **模型信息查看** - 站点支持模型信息和渠道查看
 - 🔒 **完全离线** - 插件无需联网，保护隐私安全
 
+## 🔌 适配器架构
+
+本插件采用适配器模式设计，支持不同类型的 AI 中转站点。每个适配器实现特定站点的 API 对接，并声明其支持的能力。
+
+### 支持的能力
+
+- 🔍 **AUTO_DETECT** - 自动识别账号信息
+- 💰 **BALANCE** - 余额查询
+- 📊 **USAGE_STATS** - 使用统计（今日消耗、请求数等）
+- 🔑 **TOKEN_MANAGEMENT** - 令牌管理（创建、更新、删除）
+- 🤖 **MODEL_LIST** - 获取可用模型列表
+- 💵 **MODEL_PRICING** - 获取模型定价信息
+
+### 现有适配器
+
+#### OneAPI 系列适配器
+- **支持站点**: one-api, new-api, veloera, one-hub, done-hub
+- **认证方式**: 访问令牌（Access Token）
+- **支持能力**: ✅ 全部能力
+- **余额单位**: quota_points（500,000 点 = $1）
+
+#### Cubence 适配器
+- **支持站点**: cubence
+- **认证方式**: 浏览器 Cookie（登录态）
+- **支持能力**:
+  - ✅ AUTO_DETECT - 自动识别
+  - ✅ BALANCE - 余额查询
+  - ✅ USAGE_STATS - 使用统计
+  - ❌ TOKEN_MANAGEMENT - 不支持
+  - ❌ MODEL_LIST - 不支持
+  - ❌ MODEL_PRICING - 不支持
+- **余额单位**: micro_usd（1,000,000 = $1）
+
+### 扩展新适配器
+
+如果你想为新的站点类型添加支持，可以：
+
+1. 实现 `ISiteAdapter` 接口
+2. 在 `SiteAdapterRegistry` 中注册适配器
+3. 根据站点特性声明支持的能力
+4. 提交 Pull Request
+
+详见 `adapters/` 目录下的实现示例。
+
 ## 🖥️ 截图展示
 
 ![软件截图](./docs/docs/static/image/app_show.png)

@@ -1,5 +1,5 @@
 import { Storage } from "@plasmohq/storage";
-import { refreshAccountData } from './apiService';
+import { determineHealthStatus } from "./apiService"
 import type { 
   SiteAccount, 
   StorageConfig, 
@@ -8,6 +8,8 @@ import type {
   CurrencyType,
   SiteHealthStatus 
 } from "../types";
+import { SiteAdapterRegistry } from "../adapters/SiteAdapterRegistry"
+import type { SiteCredentials, TimeRange } from "../adapters/types"
 
 // 存储键名常量
 const STORAGE_KEYS = {
@@ -36,7 +38,22 @@ class AccountStorageService {
   async getAllAccounts(): Promise<SiteAccount[]> {
     try {
       const config = await this.getStorageConfig();
-      return config.accounts;
+      const accounts = config.accounts || []
+
+      // 兼容老数据：补齐 site_type / adapter_config / 数值默认值
+      return accounts.map((account) => ({
+        ...account,
+        site_type: account.site_type ?? "one-api",
+        adapter_config: account.adapter_config ?? {},
+        account_info: {
+          ...(account.account_info as any),
+          quota: account.account_info?.quota ?? 0,
+          today_prompt_tokens: account.account_info?.today_prompt_tokens ?? 0,
+          today_completion_tokens: account.account_info?.today_completion_tokens ?? 0,
+          today_quota_consumption: account.account_info?.today_quota_consumption ?? 0,
+          today_requests_count: account.account_info?.today_requests_count ?? 0
+        }
+      }));
     } catch (error) {
       console.error('获取账号信息失败:', error);
       return [];
@@ -68,6 +85,16 @@ class AccountStorageService {
       const now = Date.now();
       const newAccount: SiteAccount = {
         ...accountData,
+        site_type: accountData.site_type ?? "one-api",
+        adapter_config: accountData.adapter_config ?? {},
+        account_info: {
+          ...(accountData.account_info as any),
+          quota: accountData.account_info?.quota ?? 0,
+          today_prompt_tokens: accountData.account_info?.today_prompt_tokens ?? 0,
+          today_completion_tokens: accountData.account_info?.today_completion_tokens ?? 0,
+          today_quota_consumption: accountData.account_info?.today_quota_consumption ?? 0,
+          today_requests_count: accountData.account_info?.today_requests_count ?? 0
+        },
         id: this.generateId(),
         created_at: now,
         updated_at: now
@@ -152,47 +179,64 @@ class AccountStorageService {
         throw new Error(`账号 ${id} 不存在`);
       }
 
-      // 使用同步导入的API服务
-      const result = await refreshAccountData(
-        account.site_url,
-        account.account_info.id,
-        account.account_info.access_token
-      );
-
-      // 构建更新数据
-      const updateData: Partial<Omit<SiteAccount, 'id' | 'created_at'>> = {
-        health_status: result.healthStatus.status,
-        last_sync_time: Date.now()
-      };
-
-      // 如果成功获取数据，更新账号信息
-      if (result.success && result.data) {
-        updateData.account_info = {
-          ...account.account_info,
-          quota: result.data.quota,
-          today_prompt_tokens: result.data.today_prompt_tokens,
-          today_completion_tokens: result.data.today_completion_tokens,
-          today_quota_consumption: result.data.today_quota_consumption,
-          today_requests_count: result.data.today_requests_count
-        };
+      const registry = SiteAdapterRegistry.getInstance()
+      const siteType = (account.site_type ?? "one-api").toLowerCase()
+      const adapter = registry.getAdapter(siteType)
+      if (!adapter) {
+        throw new Error(`不支持的站点类型: ${siteType}`)
       }
+
+      const credentials = this.buildCredentialsFromStoredAccount(account)
+      const timeRange = this.getTodayTimeRange()
+
+      const [balance, usage] = await Promise.all([
+        adapter.getAccountBalance ? adapter.getAccountBalance(credentials) : Promise.resolve(null),
+        adapter.getUsageStats ? adapter.getUsageStats(credentials, timeRange) : Promise.resolve(null)
+      ])
+
+      const updateData: Partial<Omit<SiteAccount, 'id' | 'created_at'>> = {
+        health_status: "healthy",
+        last_sync_time: Date.now()
+      }
+
+      const nextInfo: any = {
+        ...(account.account_info as any),
+        quota: account.account_info?.quota ?? 0,
+        today_prompt_tokens: account.account_info?.today_prompt_tokens ?? 0,
+        today_completion_tokens: account.account_info?.today_completion_tokens ?? 0,
+        today_quota_consumption: account.account_info?.today_quota_consumption ?? 0,
+        today_requests_count: account.account_info?.today_requests_count ?? 0
+      }
+
+      if (balance) {
+        nextInfo.quota = balance.rawBalance
+      }
+      if (usage) {
+        nextInfo.today_quota_consumption = usage.rawConsumption
+        nextInfo.today_prompt_tokens = usage.promptTokens ?? 0
+        nextInfo.today_completion_tokens = usage.completionTokens ?? 0
+        nextInfo.today_requests_count = usage.requestCount ?? 0
+      }
+
+      updateData.account_info = nextInfo
 
       // 更新账号信息
       const updateSuccess = await this.updateAccount(id, updateData);
       
       // 记录健康状态变化
-      if (account.health_status !== result.healthStatus.status) {
-        console.log(`账号 ${account.site_name} 健康状态变化: ${account.health_status} -> ${result.healthStatus.status}`);
-        console.log(`状态详情: ${result.healthStatus.message}`);
+      if (account.health_status !== updateData.health_status) {
+        console.log(`账号 ${account.site_name} 健康状态变化: ${account.health_status} -> ${updateData.health_status}`);
       }
 
       return updateSuccess;
     } catch (error) {
       console.error('刷新账号数据失败:', error);
-      // 在出现异常时也尝试更新健康状态为unknown
+      const health = determineHealthStatus(error)
+
+      // 在出现异常时也尝试更新健康状态
       try {
         await this.updateAccount(id, {
-          health_status: 'unknown',
+          health_status: health.status,
           last_sync_time: Date.now()
         });
       } catch (updateError) {
@@ -264,28 +308,44 @@ class AccountStorageService {
    * 转换为展示用的数据格式 (兼容当前 UI)
    */
   convertToDisplayData(accounts: SiteAccount[]): DisplaySiteData[] {
-    return accounts.map(account => ({
-      id: account.id,
-      icon: account.emoji,
-      name: account.site_name,
-      username: account.account_info.username,
-      balance: {
-        USD: parseFloat((account.account_info.quota / 500000).toFixed(2)),
-        CNY: parseFloat(((account.account_info.quota / 500000) * account.exchange_rate).toFixed(2))
-      },
-      todayConsumption: {
-        USD: parseFloat((account.account_info.today_quota_consumption / 500000).toFixed(2)),
-        CNY: parseFloat(((account.account_info.today_quota_consumption / 500000) * account.exchange_rate).toFixed(2))
-      },
-      todayTokens: {
-        upload: account.account_info.today_prompt_tokens,
-        download: account.account_info.today_completion_tokens
-      },
-      healthStatus: account.health_status,
-      baseUrl: account.site_url,
-      token: account.account_info.access_token,
-      userId: account.account_info.id // 添加真实的用户 ID
-    }));
+    const registry = SiteAdapterRegistry.getInstance()
+
+    return accounts.map(account => {
+      const siteType = (account.site_type ?? "one-api").toLowerCase()
+      const adapter = registry.getAdapter(siteType)
+      const factor =
+        adapter?.metadata.balance?.conversionFactor && adapter.metadata.balance.conversionFactor > 0
+          ? adapter.metadata.balance.conversionFactor
+          : 500000
+
+      const quota = account.account_info?.quota ?? 0
+      const todayConsumption = account.account_info?.today_quota_consumption ?? 0
+      const userIdNum = Number(account.account_info?.id ?? 0)
+
+      return {
+        id: account.id,
+        icon: account.emoji,
+        name: account.site_name,
+        username: account.account_info?.username || "",
+        siteType,
+        balance: {
+          USD: parseFloat((quota / factor).toFixed(2)),
+          CNY: parseFloat(((quota / factor) * account.exchange_rate).toFixed(2))
+        },
+        todayConsumption: {
+          USD: parseFloat((todayConsumption / factor).toFixed(2)),
+          CNY: parseFloat(((todayConsumption / factor) * account.exchange_rate).toFixed(2))
+        },
+        todayTokens: {
+          upload: account.account_info?.today_prompt_tokens ?? 0,
+          download: account.account_info?.today_completion_tokens ?? 0
+        },
+        healthStatus: account.health_status,
+        baseUrl: account.site_url,
+        token: account.account_info?.access_token || "",
+        userId: Number.isFinite(userIdNum) ? userIdNum : 0 // 添加真实的用户 ID
+      }
+    });
   }
 
   /**
@@ -360,6 +420,42 @@ class AccountStorageService {
     console.log('[AccountStorage] 账号数据保存完成');
   }
 
+  private getTodayTimeRange(): TimeRange {
+    return getTodayTimestampRange()
+  }
+
+  private buildCredentialsFromStoredAccount(account: SiteAccount): SiteCredentials {
+    const siteType = (account.site_type ?? "one-api").toLowerCase()
+    if (siteType === "cubence") {
+      return {
+        siteUrl: account.site_url,
+        auth: { kind: "cookie" },
+        adapterConfig: account.adapter_config
+      }
+    }
+
+    const apiKey = account.account_info?.api_key
+    if (apiKey) {
+      return {
+        siteUrl: account.site_url,
+        auth: { kind: "api-key", apiKey },
+        adapterConfig: account.adapter_config
+      }
+    }
+
+    const userId = Number(account.account_info?.id ?? NaN)
+    const accessToken = account.account_info?.access_token
+    if (!accessToken || !Number.isFinite(userId)) {
+      throw new Error("账号缺少 userId 或 access_token")
+    }
+
+    return {
+      siteUrl: account.site_url,
+      auth: { kind: "one-api-token", userId, accessToken },
+      adapterConfig: account.adapter_config
+    }
+  }
+
   /**
    * 生成唯一 ID
    */
@@ -407,8 +503,10 @@ export const AccountStorageUtils = {
       errors.push('站点 URL 不能为空');
     }
 
-    if (!account.account_info?.access_token?.trim()) {
-      errors.push('访问令牌不能为空');
+    const hasAccessToken = !!account.account_info?.access_token?.trim()
+    const hasApiKey = !!account.account_info?.api_key?.trim()
+    if (!hasAccessToken && !hasApiKey) {
+      errors.push('访问令牌或 API Key 不能为空');
     }
 
     if (!account.account_info?.username?.trim()) {
@@ -476,11 +574,13 @@ export const AccountStorageUtils = {
 
     const validationPromises = accounts.map(async (account) => {
       try {
-        const isValid = await validateAccountConnection(
-          account.site_url,
-          account.account_info.id,
-          account.account_info.access_token
-        );
+        const userId = Number(account.account_info?.id ?? NaN)
+        const accessToken = account.account_info?.access_token
+        if (!accessToken || !Number.isFinite(userId)) {
+          return { account, isValid: false }
+        }
+
+        const isValid = await validateAccountConnection(account.site_url, userId, accessToken);
         return { account, isValid };
       } catch {
         return { account, isValid: false };
@@ -501,3 +601,16 @@ export const AccountStorageUtils = {
     return { valid, invalid };
   }
 };
+
+// ---- helpers ----
+
+function getTodayTimestampRange(): TimeRange {
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  const start = Math.floor(today.getTime() / 1000)
+
+  today.setHours(23, 59, 59, 999)
+  const end = Math.floor(today.getTime() / 1000)
+
+  return { start, end }
+}

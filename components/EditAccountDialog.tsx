@@ -7,6 +7,8 @@ import { autoDetectAccount, validateAndUpdateAccount, extractDomainPrefix, isVal
 import AutoDetectErrorAlert from "./AutoDetectErrorAlert"
 import type { AutoDetectError } from "../utils/autoDetectUtils"
 import type { DisplaySiteData } from "../types"
+import { SiteAdapterRegistry } from "../adapters/SiteAdapterRegistry"
+import { AdapterCapability } from "../adapters/types"
 
 interface EditAccountDialogProps {
   isOpen: boolean
@@ -15,7 +17,11 @@ interface EditAccountDialogProps {
 }
 
 export default function EditAccountDialog({ isOpen, onClose, account }: EditAccountDialogProps) {
+  const registry = SiteAdapterRegistry.getInstance()
+  const supportedSiteTypes = registry.getSupportedSiteTypes()
+
   const [url, setUrl] = useState("")
+  const [siteType, setSiteType] = useState<string>("one-api")
   const [isDetecting, setIsDetecting] = useState(false)
   const [siteName, setSiteName] = useState("")
   const [username, setUsername] = useState("")
@@ -27,10 +33,27 @@ export default function EditAccountDialog({ isOpen, onClose, account }: EditAcco
   const [detectionError, setDetectionError] = useState<AutoDetectError | null>(null)
   const [showManualForm, setShowManualForm] = useState(true) // 编辑模式默认显示表单
   const [exchangeRate, setExchangeRate] = useState("")
+
+  const effectiveSiteType = (() => {
+    if (siteType !== "auto") return siteType
+    try {
+      const host = new URL(url).hostname.toLowerCase()
+      if (host === "cubence.com" || host.endsWith(".cubence.com")) return "cubence"
+    } catch {
+      // ignore
+    }
+    return "one-api"
+  })()
+
+  const adapter = registry.getAdapter(effectiveSiteType)
+  const isOneApiFamily = adapter?.metadata.id === "one-api"
+  const supportsAutoDetect =
+    adapter?.metadata.capabilities.includes(AdapterCapability.AUTO_DETECT) ?? false
   
   // 重置表单数据
   const resetForm = () => {
     setUrl("")
+    setSiteType("one-api")
     setIsDetected(false)
     setSiteName("")
     setUsername("")
@@ -48,10 +71,11 @@ export default function EditAccountDialog({ isOpen, onClose, account }: EditAcco
       const siteAccount = await accountStorage.getAccountById(accountId)
       if (siteAccount) {
         setUrl(siteAccount.site_url)
+        setSiteType((siteAccount.site_type ?? "one-api").toLowerCase())
         setSiteName(siteAccount.site_name)
-        setUsername(siteAccount.account_info.username)
-        setAccessToken(siteAccount.account_info.access_token)
-        setUserId(siteAccount.account_info.id.toString())
+        setUsername(siteAccount.account_info.username || "")
+        setAccessToken(siteAccount.account_info.access_token || "")
+        setUserId((siteAccount.account_info.id ?? "").toString())
         setExchangeRate(siteAccount.exchange_rate.toString())
       }
     } catch (error) {
@@ -77,7 +101,7 @@ export default function EditAccountDialog({ isOpen, onClose, account }: EditAcco
     setDetectionError(null)
     
     try {
-      const result = await autoDetectAccount(url.trim())
+      const result = await autoDetectAccount(url.trim(), siteType)
       
       if (!result.success) {
         setDetectionError(result.detailedError || null)
@@ -85,6 +109,10 @@ export default function EditAccountDialog({ isOpen, onClose, account }: EditAcco
       }
 
       if (result.data) {
+        if (siteType === "auto" && result.data.siteType) {
+          setSiteType(result.data.siteType)
+        }
+
         // 更新表单数据
         setUsername(result.data.username)
         setAccessToken(result.data.accessToken)
@@ -137,7 +165,8 @@ export default function EditAccountDialog({ isOpen, onClose, account }: EditAcco
           username.trim(),
           accessToken.trim(),
           userId.trim(),
-          exchangeRate
+          exchangeRate,
+          siteType
         ),
         {
           loading: '正在保存更改...',
@@ -231,6 +260,34 @@ export default function EditAccountDialog({ isOpen, onClose, account }: EditAcco
                       siteUrl={url}
                     />
                   )}
+
+                  {/* 站点类型 */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      站点类型
+                    </label>
+                    <select
+                      value={siteType}
+                      onChange={(e) => {
+                        const next = e.target.value
+                        setSiteType(next)
+                        setIsDetected(false)
+                        setDetectionError(null)
+                        if (next === "cubence") {
+                          setAccessToken("")
+                          setUserId("")
+                        }
+                      }}
+                      className="block w-full py-3 px-3 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent transition-colors bg-white"
+                    >
+                      <option value="auto">自动识别</option>
+                      {supportedSiteTypes.map((type) => (
+                        <option key={type} value={type}>
+                          {type}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
 
                   {/* URL 输入框 */}
                   <div>
@@ -330,61 +387,65 @@ export default function EditAccountDialog({ isOpen, onClose, account }: EditAcco
                           onChange={(e) => setUsername(e.target.value)}
                           placeholder="用户名"
                           className="block w-full pl-10 py-3 border border-gray-200 rounded-lg text-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent transition-colors"
-                          required
+                          required={isOneApiFamily}
                         />
                       </div>
                     </div>
 
-                    {/* 用户 ID */}
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        用户 ID
-                      </label>
-                      <div className="relative">
-                        <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                          <span className="text-gray-400 font-mono text-sm">#</span>
+                    {isOneApiFamily && (
+                      <>
+                        {/* 用户 ID */}
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">
+                            用户 ID
+                          </label>
+                          <div className="relative">
+                            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                              <span className="text-gray-400 font-mono text-sm">#</span>
+                            </div>
+                            <input
+                              type="number"
+                              value={userId}
+                              onChange={(e) => setUserId(e.target.value)}
+                              placeholder="用户 ID (数字)"
+                              className="block w-full pl-10 py-3 border border-gray-200 rounded-lg text-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent transition-colors"
+                              required
+                            />
+                          </div>
                         </div>
-                        <input
-                          type="number"
-                          value={userId}
-                          onChange={(e) => setUserId(e.target.value)}
-                          placeholder="用户 ID (数字)"
-                          className="block w-full pl-10 py-3 border border-gray-200 rounded-lg text-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent transition-colors"
-                          required
-                        />
-                      </div>
-                    </div>
 
-                    {/* 访问令牌 */}
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        访问令牌
-                      </label>
-                      <div className="relative">
-                        <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                          <KeyIcon className="h-5 w-5 text-gray-400" />
+                        {/* 访问令牌 */}
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">
+                            访问令牌
+                          </label>
+                          <div className="relative">
+                            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                              <KeyIcon className="h-5 w-5 text-gray-400" />
+                            </div>
+                            <input
+                              type={showAccessToken ? "text" : "password"}
+                              value={accessToken}
+                              onChange={(e) => setAccessToken(e.target.value)}
+                              placeholder="访问令牌"
+                              className="block w-full pl-10 pr-10 py-3 border border-gray-200 rounded-lg text-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent transition-colors"
+                              required
+                            />
+                            <button
+                              type="button"
+                              onClick={() => setShowAccessToken(!showAccessToken)}
+                              className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-600 transition-colors"
+                            >
+                              {showAccessToken ? (
+                                <EyeSlashIcon className="h-4 w-4" />
+                              ) : (
+                                <EyeIcon className="h-4 w-4" />
+                              )}
+                            </button>
+                          </div>
                         </div>
-                        <input
-                          type={showAccessToken ? "text" : "password"}
-                          value={accessToken}
-                          onChange={(e) => setAccessToken(e.target.value)}
-                          placeholder="访问令牌"
-                          className="block w-full pl-10 pr-10 py-3 border border-gray-200 rounded-lg text-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent transition-colors"
-                          required
-                        />
-                        <button
-                          type="button"
-                          onClick={() => setShowAccessToken(!showAccessToken)}
-                          className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-600 transition-colors"
-                        >
-                          {showAccessToken ? (
-                            <EyeSlashIcon className="h-4 w-4" />
-                          ) : (
-                            <EyeIcon className="h-4 w-4" />
-                          )}
-                        </button>
-                      </div>
-                    </div>
+                      </>
+                    )}
 
                     {/* 充值金额比例 */}
                     <div>
@@ -440,7 +501,7 @@ export default function EditAccountDialog({ isOpen, onClose, account }: EditAcco
                       <button
                         type="button"
                         onClick={handleAutoDetect}
-                        disabled={!url.trim() || isDetecting}
+                        disabled={!url.trim() || isDetecting || !supportsAutoDetect}
                         className="flex-1 flex items-center justify-center space-x-2 px-4 py-2.5 text-sm font-medium text-white bg-gradient-to-r from-blue-500 to-indigo-600 rounded-lg hover:from-blue-600 hover:to-indigo-700 transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
                       >
                         {isDetecting ? (
@@ -460,7 +521,16 @@ export default function EditAccountDialog({ isOpen, onClose, account }: EditAcco
                     {/* 保存按钮 */}
                     <button
                       type="submit"
-                      disabled={!siteName.trim() || !username.trim() || !accessToken.trim() || !userId.trim() || !isValidExchangeRate(exchangeRate) || isSaving}
+                      disabled={
+                        isOneApiFamily
+                          ? !siteName.trim() ||
+                            !username.trim() ||
+                            !accessToken.trim() ||
+                            !userId.trim() ||
+                            !isValidExchangeRate(exchangeRate) ||
+                            isSaving
+                          : !siteName.trim() || !isValidExchangeRate(exchangeRate) || isSaving
+                      }
                       className="flex-1 flex items-center justify-center space-x-2 px-4 py-2.5 text-sm font-medium text-white bg-gradient-to-r from-green-500 to-emerald-600 rounded-lg hover:from-green-600 hover:to-emerald-700 transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-green-500 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
                     >
                       {isSaving ? (

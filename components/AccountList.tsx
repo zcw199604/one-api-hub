@@ -8,6 +8,8 @@ import { useState, useCallback, useRef, useEffect } from 'react'
 import Tooltip from './Tooltip'
 import DelAccountDialog from './DelAccountDialog'
 import CopyKeyDialog from './CopyKeyDialog'
+import { SiteAdapterRegistry } from "../adapters/SiteAdapterRegistry"
+import { AdapterCapability } from "../adapters/types"
 
 type SortField = 'name' | 'balance' | 'consumption'
 type SortOrder = 'asc' | 'desc'
@@ -58,6 +60,7 @@ export default function AccountList({
   onDeleteAccount,
   onViewKeys
 }: AccountListProps) {
+  const registry = SiteAdapterRegistry.getInstance()
   const [hoveredSiteId, setHoveredSiteId] = useState<string | null>(null)
   const hoverTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const [deleteDialogAccount, setDeleteDialogAccount] = useState<DisplaySiteData | null>(null)
@@ -165,7 +168,14 @@ export default function AccountList({
       </div>
       
       {/* 账号列表 */}
-      {sites.map((site) => (
+      {sites.map((site) => {
+        const adapter = registry.getAdapter(site.siteType)
+        const supportsTokenManagement =
+          adapter?.metadata.capabilities.includes(AdapterCapability.TOKEN_MANAGEMENT) ?? false
+        const supportsModelPricing =
+          adapter?.metadata.capabilities.includes(AdapterCapability.MODEL_PRICING) ?? false
+
+        return (
         <div 
           key={site.id} 
           className="px-5 py-4 border-b border-gray-50 hover:bg-gray-25 transition-colors relative group"
@@ -236,7 +246,12 @@ export default function AccountList({
                     <MenuItem>
                       <button
                         onClick={() => handleCopyKey(site)}
-                        className="w-full px-3 py-2 text-left text-sm text-gray-700 hover:text-gray-900 data-focus:bg-gray-50 flex items-center space-x-2"
+                        disabled={!supportsTokenManagement}
+                        className={`w-full px-3 py-2 text-left text-sm flex items-center space-x-2 ${
+                          supportsTokenManagement
+                            ? "text-gray-700 hover:text-gray-900 data-focus:bg-gray-50"
+                            : "text-gray-400 cursor-not-allowed"
+                        }`}
                       >
                         <DocumentDuplicateIcon className="w-4 h-4" />
                         <span>复制密钥</span>
@@ -246,7 +261,12 @@ export default function AccountList({
                     <MenuItem>
                       <button
                         onClick={() => onViewKeys?.(site)}
-                        className="w-full px-3 py-2 text-left text-sm text-gray-700 hover:text-gray-900 data-focus:bg-gray-50 flex items-center space-x-2"
+                        disabled={!supportsTokenManagement}
+                        className={`w-full px-3 py-2 text-left text-sm flex items-center space-x-2 ${
+                          supportsTokenManagement
+                            ? "text-gray-700 hover:text-gray-900 data-focus:bg-gray-50"
+                            : "text-gray-400 cursor-not-allowed"
+                        }`}
                       >
                         <KeyIcon className="w-4 h-4" />
                         <span>管理密钥</span>
@@ -267,7 +287,12 @@ export default function AccountList({
                     <MenuItem>
                       <button
                         onClick={() => onViewModels?.(site)}
-                        className="w-full px-3 py-2 text-left text-sm text-gray-700 hover:text-gray-900 data-focus:bg-gray-50 flex items-center space-x-2"
+                        disabled={!supportsModelPricing}
+                        className={`w-full px-3 py-2 text-left text-sm flex items-center space-x-2 ${
+                          supportsModelPricing
+                            ? "text-gray-700 hover:text-gray-900 data-focus:bg-gray-50"
+                            : "text-gray-400 cursor-not-allowed"
+                        }`}
                       >
                         <CpuChipIcon className="w-4 h-4" />
                         <span>模型</span>
@@ -331,7 +356,7 @@ export default function AccountList({
             </div>
           </div>
         </div>
-      ))}
+      )})}
       
       {/* 删除账号确认对话框 */}
       <DelAccountDialog
