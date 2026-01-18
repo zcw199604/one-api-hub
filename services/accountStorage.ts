@@ -434,6 +434,24 @@ class AccountStorageService {
       }
     }
 
+    if (siteType === "right.codes") {
+      const apiKey = account.account_info?.api_key
+      if (apiKey) {
+        return {
+          siteUrl: account.site_url,
+          auth: { kind: "api-key", apiKey },
+          adapterConfig: account.adapter_config
+        }
+      }
+
+      // 兼容旧数据：若尚未缓存 user_token，则回退到 Cookie 模式
+      return {
+        siteUrl: account.site_url,
+        auth: { kind: "cookie" },
+        adapterConfig: account.adapter_config
+      }
+    }
+
     const apiKey = account.account_info?.api_key
     if (apiKey) {
       return {

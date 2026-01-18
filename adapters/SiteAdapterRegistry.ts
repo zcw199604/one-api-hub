@@ -3,6 +3,7 @@ import { AdapterRegistrationError, NotSupportedError } from "./errors"
 import { AdapterCapability } from "./types"
 import { CubenceAdapter } from "./CubenceAdapter"
 import { OneApiAdapter } from "./OneApiAdapter"
+import { RightCodesAdapter } from "./RightCodesAdapter"
 
 export class SiteAdapterRegistry {
   private static instance: SiteAdapterRegistry | null = null
@@ -90,6 +91,7 @@ export class SiteAdapterRegistry {
     // 内置适配器：编译期引入并注册
     this.registerAdapter(new OneApiAdapter())
     this.registerAdapter(new CubenceAdapter())
+    this.registerAdapter(new RightCodesAdapter())
   }
 
   private normalizeSiteType(siteType: string): string {

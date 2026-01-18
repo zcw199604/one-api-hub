@@ -101,7 +101,7 @@ async function handleCloseTempWindow(request: any, sendResponse: Function) {
 
 // 在页面上下文（MAIN world）发起请求并返回 JSON（用于需要站点 Cookie/HttpOnly 的场景）
 async function handlePageFetchJson(request: any, sendResponse: Function) {
-  const { url, requestId, fetchUrl } = request
+  const { url, requestId, fetchUrl, headers } = request
 
   if (!url || !requestId || !fetchUrl) {
     sendResponse({ success: false, error: "缺少参数: url/requestId/fetchUrl" })
@@ -134,10 +134,14 @@ async function handlePageFetchJson(request: any, sendResponse: Function) {
     const injectionResults = await chrome.scripting.executeScript({
       target: { tabId },
       world: "MAIN",
-      args: [fetchUrl],
-      func: async (u: string) => {
+      args: [fetchUrl, headers ?? null],
+      func: async (u: string, h: any) => {
         try {
-          const response = await fetch(u, { method: "GET", credentials: "include" })
+          const init: RequestInit = { method: "GET", credentials: "include" }
+          if (h && typeof h === "object") {
+            init.headers = h as Record<string, string>
+          }
+          const response = await fetch(u, init)
           const text = await response.text()
           let data: any = null
           try {

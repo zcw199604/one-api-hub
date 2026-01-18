@@ -122,6 +122,22 @@ export class AccountManager {
         return { success: false, error: validate.message || "账号连接验证失败" }
       }
 
+      // Right.Codes：将 user_token 持久化为 api_key，用于后续 Bearer token 调用（避免依赖 Cookie）
+      if (adapter.metadata.id === "right.codes") {
+        const tokenFromCredentials =
+          credentials.auth.kind === "api-key" ? credentials.auth.apiKey : ""
+        const tokenFromValidate = (validate.details as any)?.user_token
+        const token = (tokenFromCredentials || tokenFromValidate || "").trim()
+        if (token) {
+          accountInfoSeed.api_key = token
+        }
+
+        const idFromValidate = (validate.details as any)?.id
+        if (typeof idFromValidate === "number") {
+          accountInfoSeed.id = idFromValidate
+        }
+      }
+
       const resolvedUsername =
         username || (validate.details as any)?.username || (validate.details as any)?.user?.username || ""
       if (!resolvedUsername) {
@@ -193,6 +209,22 @@ export class AccountManager {
       const validate = await adapter.validateConnection(credentials)
       if (!validate.ok) {
         return { success: false, error: validate.message || "账号连接验证失败" }
+      }
+
+      // Right.Codes：将 user_token 持久化为 api_key，用于后续 Bearer token 调用（避免依赖 Cookie）
+      if (adapter.metadata.id === "right.codes") {
+        const tokenFromCredentials =
+          credentials.auth.kind === "api-key" ? credentials.auth.apiKey : ""
+        const tokenFromValidate = (validate.details as any)?.user_token
+        const token = (tokenFromCredentials || tokenFromValidate || "").trim()
+        if (token) {
+          accountInfoSeed.api_key = token
+        }
+
+        const idFromValidate = (validate.details as any)?.id
+        if (typeof idFromValidate === "number") {
+          accountInfoSeed.id = idFromValidate
+        }
       }
 
       const resolvedUsername =
@@ -342,6 +374,21 @@ export class AccountManager {
     }
 
     const accountInfo: any = account.account_info
+    if (siteType === "right.codes") {
+      const apiKey = accountInfo.api_key
+      if (apiKey) {
+        return {
+          siteUrl: account.site_url,
+          auth: { kind: "api-key", apiKey },
+          adapterConfig: (account as any).adapter_config
+        }
+      }
+      return {
+        siteUrl: account.site_url,
+        auth: { kind: "cookie" },
+        adapterConfig: (account as any).adapter_config
+      }
+    }
     const apiKey = accountInfo.api_key
     if (apiKey) {
       return { siteUrl: account.site_url, auth: { kind: "api-key", apiKey } }
@@ -380,6 +427,28 @@ export class AccountManager {
     accountInfoSeed: any
   } {
     if (adapterId === "cubence") {
+      return {
+        credentials: { siteUrl, auth: { kind: "cookie" } },
+        username: params.username?.trim() || "",
+        accountInfoSeed: {}
+      }
+    }
+
+    if (adapterId === "right.codes") {
+      const token = (params.apiKey?.trim() || params.accessToken?.trim() || "").trim()
+      const userId = (params.userId?.trim() || "").trim()
+
+      if (token) {
+        return {
+          credentials: { siteUrl, auth: { kind: "api-key", apiKey: token } },
+          username: params.username?.trim() || "",
+          accountInfoSeed: {
+            api_key: token,
+            ...(userId && Number.isFinite(Number(userId)) ? { id: Number(userId) } : {})
+          }
+        }
+      }
+
       return {
         credentials: { siteUrl, auth: { kind: "cookie" } },
         username: params.username?.trim() || "",

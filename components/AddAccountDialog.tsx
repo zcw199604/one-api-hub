@@ -37,6 +37,7 @@ export default function AddAccountDialog({ isOpen, onClose }: AddAccountDialogPr
     try {
       const host = new URL(url).hostname.toLowerCase()
       if (host === "cubence.com" || host.endsWith(".cubence.com")) return "cubence"
+      if (host === "right.codes" || host.endsWith(".right.codes")) return "right.codes"
     } catch {
       // ignore
     }
@@ -45,6 +46,7 @@ export default function AddAccountDialog({ isOpen, onClose }: AddAccountDialogPr
 
   const adapter = registry.getAdapter(effectiveSiteType)
   const isOneApiFamily = adapter?.metadata.id === "one-api"
+  const isRightCodes = adapter?.metadata.id === "right.codes"
   const supportsAutoDetect =
     adapter?.metadata.capabilities.includes(AdapterCapability.AUTO_DETECT) ?? false
 
@@ -482,6 +484,41 @@ export default function AddAccountDialog({ isOpen, onClose }: AddAccountDialogPr
                         </>
                       )}
 
+                      {isRightCodes && (
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">
+                            Bearer Token（user_token）
+                          </label>
+                          <div className="relative">
+                            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                              <KeyIcon className="h-5 w-5 text-gray-400" />
+                            </div>
+                            <input
+                              type={showAccessToken ? "text" : "password"}
+                              value={accessToken}
+                              onChange={(e) => setAccessToken(e.target.value)}
+                              placeholder="user_token（可从 /auth/me 获取）"
+                              className="block w-full pl-10 pr-10 py-3 border border-gray-200 rounded-lg text-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-colors"
+                              required
+                            />
+                            <button
+                              type="button"
+                              onClick={() => setShowAccessToken(!showAccessToken)}
+                              className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-600 transition-colors"
+                            >
+                              {showAccessToken ? (
+                                <EyeSlashIcon className="h-4 w-4" />
+                              ) : (
+                                <EyeIcon className="h-4 w-4" />
+                              )}
+                            </button>
+                          </div>
+                          <p className="mt-1 text-xs text-gray-500">
+                            仅需填写 Token；插件会自动加上 Authorization: Bearer 前缀（如果你粘贴了 Bearer 前缀也能兼容）
+                          </p>
+                        </div>
+                      )}
+
                       {/* 充值金额比例 */}
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -542,7 +579,10 @@ export default function AddAccountDialog({ isOpen, onClose }: AddAccountDialogPr
                               !userId.trim() ||
                               !isValidExchangeRate(exchangeRate) ||
                               isSaving
-                            : !siteName.trim() || !isValidExchangeRate(exchangeRate) || isSaving
+                            : !siteName.trim() ||
+                              !isValidExchangeRate(exchangeRate) ||
+                              (isRightCodes && !accessToken.trim()) ||
+                              isSaving
                         }
                         className="flex-1 flex items-center justify-center space-x-2 px-4 py-2.5 text-sm font-medium text-white bg-gradient-to-r from-green-500 to-emerald-600 rounded-lg hover:from-green-600 hover:to-emerald-700 transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-green-500 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
                       >
@@ -569,7 +609,10 @@ export default function AddAccountDialog({ isOpen, onClose }: AddAccountDialogPr
                               !userId.trim() ||
                               !isValidExchangeRate(exchangeRate) ||
                               isSaving
-                            : !siteName.trim() || !isValidExchangeRate(exchangeRate) || isSaving
+                            : !siteName.trim() ||
+                              !isValidExchangeRate(exchangeRate) ||
+                              (isRightCodes && !accessToken.trim()) ||
+                              isSaving
                         }
                         className="flex-1 flex items-center justify-center space-x-2 px-4 py-2.5 text-sm font-medium text-white bg-gradient-to-r from-green-500 to-emerald-600 rounded-lg hover:from-green-600 hover:to-emerald-700 transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-green-500 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
                       >

@@ -74,6 +74,18 @@
   - ❌ MODEL_PRICING - 不支持
 - **余额单位**: micro_usd（1,000,000 = $1）
 
+#### Right.Codes 适配器
+- **支持站点**: right.codes
+- **认证方式**: Bearer Token（`/auth/me` 返回的 `user_token`，也可用 Cookie 登录态自动识别获取）
+- **支持能力**:
+  - ✅ AUTO_DETECT - 自动识别
+  - ✅ BALANCE - 余额查询
+  - ✅ USAGE_STATS - 使用统计
+  - ❌ TOKEN_MANAGEMENT - 不支持
+  - ❌ MODEL_LIST - 不支持
+  - ❌ MODEL_PRICING - 不支持
+- **余额单位**: USD（1 = $1）
+
 ### 扩展新适配器
 
 如果你想为新的站点类型添加支持，可以：
