@@ -2,6 +2,7 @@ import {
   autoRefreshService,
   handleAutoRefreshMessage
 } from "./services/autoRefreshService"
+import { recoverSub2ApiSessionInPage, setSub2ApiBackgroundRecovery } from "./services/sub2apiSession"
 
 // 管理临时窗口的 Map
 const tempWindows = new Map<string, number>()
@@ -20,6 +21,18 @@ chrome.runtime.onInstalled.addListener(async () => {
 
 // 处理来自 popup 的消息
 chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
+  if (request.action === "recoverSub2ApiSession") {
+    // Only extension pages/background may request credential recovery.
+    if (_sender.id !== chrome.runtime.id ||
+        (_sender.tab && !_sender.url?.startsWith(`chrome-extension://${chrome.runtime.id}/`))) {
+      sendResponse({ success: false, error: "不允许的凭据更新来源" })
+      return false
+    }
+    handleSub2ApiRecovery(request).then(sendResponse, () => {
+      sendResponse({ success: false, error: "Sub2API 凭据更新失败" })
+    })
+    return true
+  }
   if (request.action === "openTempWindow") {
     handleOpenTempWindow(request, sendResponse)
     return true // 保持异步响应通道
@@ -55,6 +68,54 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
     return true
   }
 })
+
+const sub2ApiRecoveries = new Map<string, Promise<any>>()
+setSub2ApiBackgroundRecovery(handleSub2ApiRecovery)
+
+async function handleSub2ApiRecovery(request: {
+  url: string; expectedUserId: string; failedToken: string
+}) {
+  const origin = new URL(request.url).origin
+  if (!origin.startsWith("https://") || !/^\d+$/.test(request.expectedUserId) || !request.failedToken) {
+    return { success: false, error: "Sub2API 凭据更新参数无效" }
+  }
+  const key = `${origin}/${request.expectedUserId}`
+  const pending = sub2ApiRecoveries.get(key)
+  if (pending) return pending
+  const recovery = (async () => {
+    let temporaryWindowId: number | undefined
+    try {
+      // Prefer an existing tab so the website's normal session recovery can finish.
+      const tabs = await chrome.tabs.query({})
+      const existing = tabs.find(tab => {
+        try { return !!tab.id && new URL(tab.url || "").origin === origin }
+        catch { return false }
+      })
+      let tabId = existing?.id
+      if (!tabId) {
+        const window = await chrome.windows.create({ url: origin, type: "popup", focused: false, width: 800, height: 600 })
+        temporaryWindowId = window.id
+        tabId = window.tabs?.[0]?.id
+      }
+      if (!tabId) throw new Error("无法打开 Sub2API 登录页面")
+      await waitForTabComplete(tabId)
+      const results = await chrome.scripting.executeScript({
+        target: { tabId }, world: "MAIN", func: recoverSub2ApiSessionInPage,
+        args: [origin, request.expectedUserId, request.failedToken]
+      })
+      return results[0]?.result || { success: false, error: "Sub2API 页面未返回凭据" }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : "Sub2API 凭据更新失败" }
+    } finally {
+      if (temporaryWindowId !== undefined) {
+        try { await chrome.windows.remove(temporaryWindowId) } catch { /* already closed */ }
+      }
+    }
+  })()
+  sub2ApiRecoveries.set(key, recovery)
+  try { return await recovery }
+  finally { if (sub2ApiRecoveries.get(key) === recovery) sub2ApiRecoveries.delete(key) }
+}
 
 // 打开临时窗口访问指定站点
 async function handleOpenTempWindow(request: any, sendResponse: Function) {
@@ -101,7 +162,7 @@ async function handleCloseTempWindow(request: any, sendResponse: Function) {
 
 // 在页面上下文（MAIN world）发起请求并返回 JSON（用于需要站点 Cookie/HttpOnly 的场景）
 async function handlePageFetchJson(request: any, sendResponse: Function) {
-  const { url, requestId, fetchUrl, headers } = request
+  const { url, requestId, fetchUrl, headers, credentials } = request
 
   if (!url || !requestId || !fetchUrl) {
     sendResponse({ success: false, error: "缺少参数: url/requestId/fetchUrl" })
@@ -134,10 +195,12 @@ async function handlePageFetchJson(request: any, sendResponse: Function) {
     const injectionResults = await chrome.scripting.executeScript({
       target: { tabId },
       world: "MAIN",
-      args: [fetchUrl, headers ?? null],
-      func: async (u: string, h: any) => {
+      args: [fetchUrl, headers ?? null, credentials ?? null],
+      func: async (u: string, h: any, c: any) => {
         try {
-          const init: RequestInit = { method: "GET", credentials: "include" }
+          const normalizedCredentials: RequestCredentials =
+            c === "omit" || c === "include" || c === "same-origin" ? c : "include"
+          const init: RequestInit = { method: "GET", credentials: normalizedCredentials }
           if (h && typeof h === "object") {
             init.headers = h as Record<string, string>
           }
@@ -244,7 +307,8 @@ async function handleAutoDetectSite(request: any, sendResponse: Function) {
       success: true,
       data: {
         userId: userResponse.data.userId,
-        user: userResponse.data.user
+        user: userResponse.data.user,
+        authToken: userResponse.data.authToken
       }
     })
   } catch (error) {

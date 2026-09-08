@@ -1,9 +1,10 @@
 import { Storage } from "@plasmohq/storage";
+import type { BalanceTab } from "../types";
 
 // 用户偏好设置类型定义
 export interface UserPreferences {
   // BalanceSection 相关配置
-  activeTab: 'consumption' | 'balance';  // 金额标签页状态
+  activeTab: BalanceTab;  // 金额标签页状态
   currencyType: 'USD' | 'CNY';           // 金额单位
 
   // AccountList 相关配置
@@ -84,7 +85,7 @@ class UserPreferencesService {
   /**
    * 更新活动标签页
    */
-  async updateActiveTab(activeTab: 'consumption' | 'balance'): Promise<boolean> {
+  async updateActiveTab(activeTab: BalanceTab): Promise<boolean> {
     return this.savePreferences({ activeTab });
   }
 
@@ -206,8 +207,8 @@ export const UserPreferencesUtils = {
   validatePreferences(preferences: Partial<UserPreferences>): string[] {
     const errors: string[] = [];
 
-    if (preferences.activeTab && !['consumption', 'balance'].includes(preferences.activeTab)) {
-      errors.push('activeTab 必须是 "consumption" 或 "balance"');
+    if (preferences.activeTab && !['consumption', 'balance', 'subscription'].includes(preferences.activeTab)) {
+      errors.push('activeTab 必须是 "consumption" / "balance" / "subscription"');
     }
 
     if (preferences.currencyType && !['USD', 'CNY'].includes(preferences.currencyType)) {
@@ -246,8 +247,13 @@ export const UserPreferencesUtils = {
   /**
    * 获取标签页的显示名称
    */
-  getTabDisplayName(tab: 'consumption' | 'balance'): string {
-    return tab === 'consumption' ? '今日消耗' : '总余额';
+  getTabDisplayName(tab: BalanceTab): string {
+    switch (tab) {
+      case 'consumption': return '今日消耗';
+      case 'balance': return '总余额';
+      case 'subscription': return '订阅信息';
+      default: return '未知';
+    }
   },
 
   /**

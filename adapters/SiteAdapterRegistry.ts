@@ -3,7 +3,9 @@ import { AdapterRegistrationError, NotSupportedError } from "./errors"
 import { AdapterCapability } from "./types"
 import { CubenceAdapter } from "./CubenceAdapter"
 import { OneApiAdapter } from "./OneApiAdapter"
+import { PortunexAdapter } from "./PortunexAdapter"
 import { RightCodesAdapter } from "./RightCodesAdapter"
+import { Sub2ApiAdapter } from "./Sub2ApiAdapter"
 
 export class SiteAdapterRegistry {
   private static instance: SiteAdapterRegistry | null = null
@@ -92,6 +94,8 @@ export class SiteAdapterRegistry {
     this.registerAdapter(new OneApiAdapter())
     this.registerAdapter(new CubenceAdapter())
     this.registerAdapter(new RightCodesAdapter())
+    this.registerAdapter(new PortunexAdapter())
+    this.registerAdapter(new Sub2ApiAdapter())
   }
 
   private normalizeSiteType(siteType: string): string {

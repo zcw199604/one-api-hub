@@ -86,6 +86,32 @@
   - ❌ MODEL_PRICING - 不支持
 - **余额单位**: USD（1 = $1）
 
+#### Portunex 适配器
+- **支持站点**: portunex
+- **认证方式**: Bearer Token（session token）
+- **支持能力**:
+  - ✅ BALANCE - 余额查询
+  - ✅ USAGE_STATS - 使用统计
+  - ❌ AUTO_DETECT - 不支持
+  - ❌ TOKEN_MANAGEMENT - 不支持
+  - ❌ MODEL_LIST - 不支持
+  - ❌ MODEL_PRICING - 不支持
+- **余额单位**: points（1 = $1）
+
+#### Sub2API 适配器
+- **支持站点**: sub2api
+- **认证方式**: 用户面板 JWT（登录后 localStorage 中的 `auth_token`）
+- **凭据续期**: 余额/用量刷新遇到 401 时，复用已登录页面（没有则临时打开站点），同步最新 Token 或调用官方刷新接口；校验账号一致后保存新访问 Token 并重试一次。刷新令牌仅留在站点 localStorage。浏览器需支持 Web Locks；登录失效时需在站点重新登录。
+- **密钥管理**: 支持列表、复制、创建、编辑、删除、启用/禁用和按 Key 查询今日用量。支持分组、美元总额度上限、有效期、IP 黑白名单及时间窗口额度限制；Key 操作同样支持 401 后续期重试。
+- **支持能力**:
+  - ✅ BALANCE - 余额查询
+  - ✅ AUTO_DETECT - 从已登录页面读取 `auth_token`
+  - ✅ USAGE_STATS - 查询今日实际消耗、Token 数和请求数
+  - ✅ TOKEN_MANAGEMENT - API Key 管理
+  - ❌ MODEL_LIST - 不支持
+  - ❌ MODEL_PRICING - 不支持
+- **余额单位**: USD（1 = $1）
+
 ### 扩展新适配器
 
 如果你想为新的站点类型添加支持，可以：

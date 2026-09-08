@@ -29,6 +29,7 @@ export interface BalanceInfo {
   rawUnit: string
   conversionFactor?: number
   balanceUSD?: number
+  extra?: Record<string, unknown>  // 扩展字段，用于存储订阅信息等特殊数据
 }
 
 export interface UsageStats {
@@ -80,6 +81,8 @@ export interface PaginationParams {
 }
 
 export interface ApiToken {
+  quota_conversion_factor?: number
+  status_label?: string
   id: number
   user_id: number
   key: string

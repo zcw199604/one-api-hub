@@ -2,7 +2,7 @@ import "./style.css"
 import { useState, useCallback, useMemo, useEffect } from "react"
 import toast, { Toaster } from 'react-hot-toast'
 import { UI_CONSTANTS } from "../constants/ui"
-import { calculateTotalConsumption, calculateTotalBalance, getOppositeCurrency } from "../utils/formatters"
+import { calculateConsumptionBreakdown, calculateTotalConsumption, calculateTotalBalance, getOppositeCurrency } from "../utils/formatters"
 import { useAccountData } from "../hooks/useAccountData"
 import { useSort } from "../hooks/useSort"
 import { useUserPreferences } from "../hooks/useUserPreferences"
@@ -13,7 +13,7 @@ import AccountList from "../components/AccountList"
 import AddAccountDialog from "../components/AddAccountDialog"
 import EditAccountDialog from "../components/EditAccountDialog"
 import { accountStorage } from "../services/accountStorage"
-import type { DisplaySiteData } from "../types"
+import type { BalanceTab, DisplaySiteData, SubscriptionInfo } from "../types"
 
 function IndexPopup() {
   // 用户偏好设置管理
@@ -63,7 +63,11 @@ function IndexPopup() {
     calculateTotalConsumption(displayData),
     [displayData]
   )
-  
+
+  const consumptionBreakdown = useMemo(() =>
+    calculateConsumptionBreakdown(displayData),
+    [displayData]
+  )
   const totalBalance = useMemo(() => 
     calculateTotalBalance(displayData), 
     [displayData]
@@ -73,6 +77,20 @@ function IndexPopup() {
     upload: stats.today_total_prompt_tokens,
     download: stats.today_total_completion_tokens
   }), [stats.today_total_prompt_tokens, stats.today_total_completion_tokens])
+  // 计算订阅信息 - 选择最早到期的订阅
+  const subscription = useMemo(() => {
+    const subscriptions = displayData
+      .map(account => account.subscription)
+      .filter((sub): sub is SubscriptionInfo => Boolean(sub))
+      .sort((a, b) => a.expireTime - b.expireTime)
+
+    return subscriptions[0]
+  }, [displayData])
+  useEffect(() => {
+    if (!subscription && activeTab === 'subscription') {
+      void updateActiveTab('balance')
+    }
+  }, [activeTab, subscription, updateActiveTab])
 
   // 事件处理 - 使用 useCallback 优化
   const handleCurrencyToggle = useCallback(async () => {
@@ -81,10 +99,11 @@ function IndexPopup() {
   }, [currencyType, updateCurrencyType])
 
   const handleTabChange = useCallback(async (index: number) => {
-    const newTab = index === 0 ? 'consumption' : 'balance'
-    await updateActiveTab(newTab)
-    console.log(`切换到${newTab === 'consumption' ? '今日消耗' : '总余额'}标签页`)
-  }, [updateActiveTab])
+    const newTab: BalanceTab = index === 0 ? 'consumption' : index === 1 ? 'balance' : 'subscription'
+    const resolvedTab: BalanceTab = subscription ? newTab : newTab === 'subscription' ? 'balance' : newTab
+    await updateActiveTab(resolvedTab)
+    console.log(`切换到${resolvedTab === 'consumption' ? '今日消耗' : resolvedTab === 'balance' ? '总余额' : '订阅信息'}标签页`)
+  }, [subscription, updateActiveTab])
 
   const handleOpenTab = useCallback(() => {
     chrome.tabs.create({ url: chrome.runtime.getURL('options.html') })
@@ -267,6 +286,7 @@ function IndexPopup() {
         {!preferencesLoading && (
           <BalanceSection
             totalConsumption={totalConsumption}
+            consumptionBreakdown={consumptionBreakdown}
             totalBalance={totalBalance}
             todayTokens={todayTokens}
             currencyType={currencyType}
@@ -274,6 +294,7 @@ function IndexPopup() {
             isInitialLoad={isInitialLoad}
             lastUpdateTime={lastUpdateTime}
             prevTotalConsumption={prevTotalConsumption}
+            subscription={subscription}
             onCurrencyToggle={handleCurrencyToggle}
             onTabChange={handleTabChange}
           />

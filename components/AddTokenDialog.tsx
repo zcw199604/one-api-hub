@@ -74,7 +74,8 @@ export default function AddTokenDialog({ isOpen, onClose, availableAccounts, pre
     if (isOpen) {
       if (isEditMode && editingToken) {
         // 编辑模式：从 editingToken 填充表单数据
-        const matchingAccount = availableAccounts.find(acc => acc.name === editingToken.accountName)
+        const matchingAccount = availableAccounts.find(acc => acc.id === preSelectedAccountId)
+          || availableAccounts.find(acc => acc.name === editingToken.accountName)
         const accountId = matchingAccount?.id || (availableAccounts.length > 0 ? availableAccounts[0].id : '')
         
         setFormData({

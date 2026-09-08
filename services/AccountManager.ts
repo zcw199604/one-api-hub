@@ -4,6 +4,15 @@ import type { SiteAccount } from "../types"
 import { accountStorage } from "./accountStorage"
 import { analyzeAutoDetectError, type AutoDetectError } from "../utils/autoDetectUtils"
 import { determineHealthStatus } from "./apiService"
+import { fetchAccountSnapshot } from "./fetchAccountSnapshot"
+
+type RightCodesBalanceExtra = {
+  expire_time?: number
+  subscription_status?: string
+  daily_limit?: number
+  plan_type?: string
+  daily_used?: number
+}
 
 // 对齐现有 accountOperations 的返回结构（便于向后兼容）
 export interface AccountValidationResult {
@@ -95,13 +104,14 @@ export class AccountManager {
 
   async validateAndSaveAccount(params: ValidateAndSaveParams): Promise<AccountSaveResult> {
     const siteName = params.siteName.trim()
-    const siteUrl = params.url.trim()
+    const inputSiteUrl = params.url.trim()
 
-    if (!siteUrl || !siteName) {
+    if (!inputSiteUrl || !siteName) {
       return { success: false, error: "请填写完整的账号信息" }
     }
 
-    const resolvedSiteType = await this.resolveSiteType(siteUrl, params.siteType)
+    const resolvedSiteType = await this.resolveSiteType(inputSiteUrl, params.siteType)
+    const siteUrl = resolvedSiteType === "portunex" ? PORTUNEX_DEFAULT_SITE_URL : inputSiteUrl
     const adapter = this.registry.getAdapter(resolvedSiteType)
     if (!adapter) {
       return { success: false, error: `不支持的站点类型: ${resolvedSiteType}` }
@@ -128,6 +138,20 @@ export class AccountManager {
           credentials.auth.kind === "api-key" ? credentials.auth.apiKey : ""
         const tokenFromValidate = (validate.details as any)?.user_token
         const token = (tokenFromCredentials || tokenFromValidate || "").trim()
+        if (token) {
+          accountInfoSeed.api_key = token
+        }
+
+        const idFromValidate = (validate.details as any)?.id
+        if (typeof idFromValidate === "number") {
+          accountInfoSeed.id = idFromValidate
+        }
+      }
+
+      if (adapter.metadata.id === "portunex" || adapter.metadata.id === "sub2api") {
+        const tokenFromCredentials =
+          credentials.auth.kind === "api-key" ? credentials.auth.apiKey : ""
+        const token = (tokenFromCredentials || "").trim()
         if (token) {
           accountInfoSeed.api_key = token
         }
@@ -164,7 +188,17 @@ export class AccountManager {
           today_prompt_tokens: usage?.promptTokens ?? 0,
           today_completion_tokens: usage?.completionTokens ?? 0,
           today_quota_consumption: usage?.rawConsumption ?? 0,
-          today_requests_count: usage?.requestCount ?? 0
+          today_requests_count: usage?.requestCount ?? 0,
+          // Right.codes 订阅信息
+          ...(adapter.metadata.id === "right.codes" && balance?.extra
+            ? {
+                expire_time: (balance.extra as RightCodesBalanceExtra).expire_time,
+                subscription_status: (balance.extra as RightCodesBalanceExtra).subscription_status,
+                daily_limit: (balance.extra as RightCodesBalanceExtra).daily_limit,
+                plan_type: (balance.extra as RightCodesBalanceExtra).plan_type,
+                daily_used: (balance.extra as RightCodesBalanceExtra).daily_used
+              }
+            : {})
         },
         last_sync_time: Date.now()
       }
@@ -184,13 +218,14 @@ export class AccountManager {
     }
 
     const siteName = params.siteName.trim()
-    const siteUrl = params.url.trim()
+    const inputSiteUrl = params.url.trim()
 
-    if (!siteUrl || !siteName) {
+    if (!inputSiteUrl || !siteName) {
       return { success: false, error: "请填写完整的账号信息" }
     }
 
-    const resolvedSiteType = await this.resolveSiteType(siteUrl, params.siteType)
+    const resolvedSiteType = await this.resolveSiteType(inputSiteUrl, params.siteType)
+    const siteUrl = resolvedSiteType === "portunex" ? PORTUNEX_DEFAULT_SITE_URL : inputSiteUrl
     const adapter = this.registry.getAdapter(resolvedSiteType)
     if (!adapter) {
       return { success: false, error: `不支持的站点类型: ${resolvedSiteType}` }
@@ -227,6 +262,20 @@ export class AccountManager {
         }
       }
 
+      if (adapter.metadata.id === "portunex" || adapter.metadata.id === "sub2api") {
+        const tokenFromCredentials =
+          credentials.auth.kind === "api-key" ? credentials.auth.apiKey : ""
+        const token = (tokenFromCredentials || "").trim()
+        if (token) {
+          accountInfoSeed.api_key = token
+        }
+
+        const idFromValidate = (validate.details as any)?.id
+        if (typeof idFromValidate === "number") {
+          accountInfoSeed.id = idFromValidate
+        }
+      }
+
       const resolvedUsername =
         username || (validate.details as any)?.username || (validate.details as any)?.user?.username || ""
       if (!resolvedUsername) {
@@ -251,7 +300,17 @@ export class AccountManager {
           today_prompt_tokens: usage?.promptTokens ?? 0,
           today_completion_tokens: usage?.completionTokens ?? 0,
           today_quota_consumption: usage?.rawConsumption ?? 0,
-          today_requests_count: usage?.requestCount ?? 0
+          today_requests_count: usage?.requestCount ?? 0,
+          // Right.codes 订阅信息
+          ...(adapter.metadata.id === "right.codes" && balance?.extra
+            ? {
+                expire_time: (balance.extra as RightCodesBalanceExtra).expire_time,
+                subscription_status: (balance.extra as RightCodesBalanceExtra).subscription_status,
+                daily_limit: (balance.extra as RightCodesBalanceExtra).daily_limit,
+                plan_type: (balance.extra as RightCodesBalanceExtra).plan_type,
+                daily_used: (balance.extra as RightCodesBalanceExtra).daily_used
+              }
+            : {})
         },
         last_sync_time: Date.now()
       }
@@ -281,14 +340,33 @@ export class AccountManager {
       const credentials = this.buildCredentialsFromStoredAccount(account)
       const timeRange = this.getTodayTimeRange()
 
-      const [balance, usage] = await Promise.all([
-        adapter.getAccountBalance ? adapter.getAccountBalance(credentials) : Promise.resolve(null),
-        adapter.getUsageStats ? adapter.getUsageStats(credentials, timeRange) : Promise.resolve(null)
-      ])
+      const [balance, usage] = await fetchAccountSnapshot(
+        adapter, credentials, timeRange, account.account_info?.id,
+        async token => {
+          const latest = await accountStorage.getAccountById(accountId)
+          if (!latest || latest.site_url !== account.site_url || latest.site_type !== account.site_type ||
+              (latest.account_info.api_key !== account.account_info.api_key && latest.account_info.api_key !== token)) {
+            throw new Error("账号凭据已变化，请重新刷新")
+          }
+          if (!await accountStorage.updateAccount(accountId, { account_info: { ...latest.account_info, api_key: token } })) {
+            throw new Error("保存 Sub2API 新凭据失败")
+          }
+          account.account_info.api_key = token
+        }
+      )
 
       const nextInfo: any = { ...account.account_info }
       if (balance) {
         nextInfo.quota = balance.rawBalance
+      }
+
+      if (adapter.metadata.id === "right.codes" && balance?.extra) {
+        const extra = balance.extra as RightCodesBalanceExtra
+        nextInfo.expire_time = extra.expire_time
+        nextInfo.subscription_status = extra.subscription_status
+        nextInfo.daily_limit = extra.daily_limit
+        nextInfo.plan_type = extra.plan_type
+        nextInfo.daily_used = extra.daily_used
       }
       if (usage) {
         nextInfo.today_quota_consumption = usage.rawConsumption
@@ -373,6 +451,19 @@ export class AccountManager {
       }
     }
 
+    if (siteType === "portunex") {
+      const accountInfo: any = account.account_info
+      const apiKey = accountInfo.api_key
+      if (!apiKey) {
+        throw new Error("Portunex 账号缺少 api_key（Bearer token），请编辑账号补充 Token")
+      }
+      return {
+        siteUrl: account.site_url,
+        auth: { kind: "api-key", apiKey },
+        adapterConfig: (account as any).adapter_config
+      }
+    }
+
     const accountInfo: any = account.account_info
     if (siteType === "right.codes") {
       const apiKey = accountInfo.api_key
@@ -434,6 +525,30 @@ export class AccountManager {
       }
     }
 
+    if (adapterId === "portunex") {
+      const token = (params.apiKey?.trim() || params.accessToken?.trim() || "").trim()
+      if (!token) {
+        throw new Error("请填写 Bearer Token（session token）")
+      }
+      return {
+        credentials: { siteUrl, auth: { kind: "api-key", apiKey: token } },
+        username: params.username?.trim() || "",
+        accountInfoSeed: { api_key: token }
+      }
+    }
+
+    if (adapterId === "sub2api") {
+      const token = (params.apiKey?.trim() || params.accessToken?.trim() || "").trim()
+      if (!token) {
+        throw new Error("请填写 Sub2API 用户面板 Token")
+      }
+      return {
+        credentials: { siteUrl, auth: { kind: "api-key", apiKey: token } },
+        username: params.username?.trim() || "",
+        accountInfoSeed: { api_key: token }
+      }
+    }
+
     if (adapterId === "right.codes") {
       const token = (params.apiKey?.trim() || params.accessToken?.trim() || "").trim()
       const userId = (params.userId?.trim() || "").trim()
@@ -477,3 +592,5 @@ export class AccountManager {
     }
   }
 }
+
+const PORTUNEX_DEFAULT_SITE_URL = "https://portunex.gewulabs.group"

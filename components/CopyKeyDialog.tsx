@@ -1,4 +1,4 @@
-import { Fragment, useState, useEffect } from "react"
+import { Fragment, useState, useEffect, useRef } from "react"
 import toast from 'react-hot-toast'
 import { Dialog, DialogPanel, DialogTitle, Transition, TransitionChild } from "@headlessui/react"
 import { 
@@ -13,7 +13,8 @@ import {
   ChevronRightIcon
 } from "@heroicons/react/24/outline"
 import { UI_CONSTANTS } from "../constants/ui"
-import { fetchAccountTokens, type ApiToken } from "../services/apiService"
+import type { ApiToken } from "../adapters/types"
+import { listAccountKeys, keyForClipboard } from "../services/tokenManagement"
 import type { DisplaySiteData } from "../types"
 import { SiteAdapterRegistry } from "../adapters/SiteAdapterRegistry"
 import { AdapterCapability } from "../adapters/types"
@@ -30,6 +31,7 @@ export default function CopyKeyDialog({ isOpen, onClose, account }: CopyKeyDialo
   const [error, setError] = useState<string | null>(null)
   const [copiedKey, setCopiedKey] = useState<string | null>(null)
   const [expandedTokens, setExpandedTokens] = useState<Set<number>>(new Set())
+  const loadVersion = useRef(0)
 
   // 获取密钥列表
   const fetchTokens = async () => {
@@ -37,6 +39,8 @@ export default function CopyKeyDialog({ isOpen, onClose, account }: CopyKeyDialo
 
     setIsLoading(true)
     setError(null)
+    setTokens([])
+    const version = ++loadVersion.current
     
     try {
       const adapter = SiteAdapterRegistry.getInstance().getAdapter(account.siteType)
@@ -48,14 +52,8 @@ export default function CopyKeyDialog({ isOpen, onClose, account }: CopyKeyDialo
         return
       }
 
-      if (!account.token || !account.userId) {
-        setError("缺少访问令牌或用户 ID，无法获取密钥列表")
-        setTokens([])
-        return
-      }
-
-      // 使用 DisplaySiteData 中的 userId 字段
-      const tokensResponse = await fetchAccountTokens(account.baseUrl, account.userId, account.token)
+      const tokensResponse = await listAccountKeys(account.id)
+      if (version !== loadVersion.current) return
       
       // 确保返回的是数组
       if (Array.isArray(tokensResponse)) {
@@ -65,11 +63,12 @@ export default function CopyKeyDialog({ isOpen, onClose, account }: CopyKeyDialo
         setTokens([])
       }
     } catch (error) {
+      if (version !== loadVersion.current) return
       console.error('获取密钥列表失败:', error)
       const errorMessage = error instanceof Error ? error.message : '未知错误'
       setError(`获取密钥列表失败: ${errorMessage}`)
     } finally {
-      setIsLoading(false)
+      if (version === loadVersion.current) setIsLoading(false)
     }
   }
 
@@ -84,13 +83,14 @@ export default function CopyKeyDialog({ isOpen, onClose, account }: CopyKeyDialo
       setCopiedKey(null)
       setExpandedTokens(new Set())
     }
+    return () => { loadVersion.current++ }
   }, [isOpen, account])
 
   // 复制密钥到剪贴板
   const copyKey = async (key: string) => {
     try {
       // 检查key是否以"sk-"开头，如果不是则添加前缀
-      const textToCopy = key.startsWith('sk-') ? key : 'sk-' + key;
+      const textToCopy = keyForClipboard(key, account?.siteType)
       await navigator.clipboard.writeText(textToCopy);
       setCopiedKey(key);
       toast.success('密钥已复制到剪贴板');
@@ -126,13 +126,13 @@ export default function CopyKeyDialog({ isOpen, onClose, account }: CopyKeyDialo
     }
     
     // 使用CONVERSION_FACTOR转换真实额度
-    const realQuota = token.remain_quota / UI_CONSTANTS.EXCHANGE_RATE.CONVERSION_FACTOR
+    const realQuota = token.remain_quota / (token.quota_conversion_factor ?? UI_CONSTANTS.EXCHANGE_RATE.CONVERSION_FACTOR)
     return `$${realQuota.toFixed(2)}`
   }
 
   // 格式化已用额度
   const formatUsedQuota = (token: ApiToken) => {
-    const realUsedQuota = token.used_quota / UI_CONSTANTS.EXCHANGE_RATE.CONVERSION_FACTOR
+    const realUsedQuota = token.used_quota / (token.quota_conversion_factor ?? UI_CONSTANTS.EXCHANGE_RATE.CONVERSION_FACTOR)
     return `$${realUsedQuota.toFixed(2)}`
   }
 
@@ -291,7 +291,7 @@ export default function CopyKeyDialog({ isOpen, onClose, account }: CopyKeyDialo
                               <span 
                                 className={`inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium border ${getStatusBadgeStyle(token.status)}`}
                               >
-                                {token.status === 1 ? '启用' : '禁用'}
+                                {token.status_label || (token.status === 1 ? '启用' : '禁用')}
                               </span>
                               
                               {/* 展开/折叠图标 */}

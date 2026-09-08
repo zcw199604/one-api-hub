@@ -40,8 +40,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === "getUserFromLocalStorage") {
     ;(async () => {
       try {
-        // 所有异步逻辑
-        const userStr = localStorage.getItem("user")
+        // OneAPI 系列使用 user；Sub2API 使用 auth_user/auth_token。
+        const userStr = localStorage.getItem("user") || localStorage.getItem("auth_user")
+        const authToken = localStorage.getItem("auth_token") || ""
         let user = userStr
           ? JSON.parse(userStr)
           : await fetchUserInfo(request.url)
@@ -54,7 +55,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           return
         }
 
-        sendResponse({ success: true, data: { userId: user.id, user } })
+        sendResponse({ success: true, data: { userId: user.id, user, authToken } })
       } catch (e) {
         sendResponse({ success: false, error: e.message })
       }

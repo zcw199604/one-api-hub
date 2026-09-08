@@ -5,11 +5,21 @@ import type {
   StorageConfig, 
   AccountStats, 
   DisplaySiteData,
+  SubscriptionInfo,
   CurrencyType,
   SiteHealthStatus 
 } from "../types";
 import { SiteAdapterRegistry } from "../adapters/SiteAdapterRegistry"
 import type { SiteCredentials, TimeRange } from "../adapters/types"
+import { fetchAccountSnapshot } from "./fetchAccountSnapshot"
+
+type RightCodesBalanceExtra = {
+  expire_time?: number
+  subscription_status?: string
+  daily_limit?: number
+  plan_type?: string
+  daily_used?: number
+}
 
 // 存储键名常量
 const STORAGE_KEYS = {
@@ -189,10 +199,20 @@ class AccountStorageService {
       const credentials = this.buildCredentialsFromStoredAccount(account)
       const timeRange = this.getTodayTimeRange()
 
-      const [balance, usage] = await Promise.all([
-        adapter.getAccountBalance ? adapter.getAccountBalance(credentials) : Promise.resolve(null),
-        adapter.getUsageStats ? adapter.getUsageStats(credentials, timeRange) : Promise.resolve(null)
-      ])
+      const [balance, usage] = await fetchAccountSnapshot(
+        adapter, credentials, timeRange, account.account_info?.id,
+        async token => {
+          const latest = await this.getAccountById(id)
+          if (!latest || latest.site_url !== account.site_url || latest.site_type !== account.site_type ||
+              (latest.account_info.api_key !== account.account_info.api_key && latest.account_info.api_key !== token)) {
+            throw new Error("账号凭据已变化，请重新刷新")
+          }
+          if (!await this.updateAccount(id, { account_info: { ...latest.account_info, api_key: token } })) {
+            throw new Error("保存 Sub2API 新凭据失败")
+          }
+          account.account_info.api_key = token
+        }
+      )
 
       const updateData: Partial<Omit<SiteAccount, 'id' | 'created_at'>> = {
         health_status: "healthy",
@@ -210,6 +230,15 @@ class AccountStorageService {
 
       if (balance) {
         nextInfo.quota = balance.rawBalance
+      }
+
+      if (siteType === "right.codes" && balance?.extra) {
+        const extra = balance.extra as RightCodesBalanceExtra
+        nextInfo.expire_time = extra.expire_time
+        nextInfo.subscription_status = extra.subscription_status
+        nextInfo.daily_limit = extra.daily_limit
+        nextInfo.plan_type = extra.plan_type
+        nextInfo.daily_used = extra.daily_used
       }
       if (usage) {
         nextInfo.today_quota_consumption = usage.rawConsumption
@@ -320,7 +349,27 @@ class AccountStorageService {
 
       const quota = account.account_info?.quota ?? 0
       const todayConsumption = account.account_info?.today_quota_consumption ?? 0
+
       const userIdNum = Number(account.account_info?.id ?? 0)
+
+      // 计算订阅信息（仅限包月账号）
+      let subscription: SubscriptionInfo | undefined = undefined
+      const info = account.account_info
+      const expireTimeRaw = info?.expire_time
+      if (typeof expireTimeRaw === "number" && expireTimeRaw > 0) {
+        const expireTime = expireTimeRaw > 10_000_000_000 ? Math.floor(expireTimeRaw / 1000) : expireTimeRaw
+        const now = Date.now() / 1000
+        const daysRemaining = Math.ceil((expireTime - now) / 86400)
+
+        subscription = {
+          expireTime,
+          status: info.subscription_status,
+          dailyLimit: info.daily_limit,
+          dailyUsed: info.daily_used,
+          planType: info.plan_type,
+          daysRemaining
+        }
+      }
 
       return {
         id: account.id,
@@ -343,7 +392,8 @@ class AccountStorageService {
         healthStatus: account.health_status,
         baseUrl: account.site_url,
         token: account.account_info?.access_token || "",
-        userId: Number.isFinite(userIdNum) ? userIdNum : 0 // 添加真实的用户 ID
+        userId: Number.isFinite(userIdNum) ? userIdNum : 0, // 添加真实的用户 ID
+        subscription // 订阅信息（可选）
       }
     });
   }
@@ -430,6 +480,18 @@ class AccountStorageService {
       return {
         siteUrl: account.site_url,
         auth: { kind: "cookie" },
+        adapterConfig: account.adapter_config
+      }
+    }
+
+    if (siteType === "portunex") {
+      const apiKey = account.account_info?.api_key
+      if (!apiKey) {
+        throw new Error("Portunex 账号缺少 api_key（Bearer token），请编辑账号补充 Token")
+      }
+      return {
+        siteUrl: account.site_url,
+        auth: { kind: "api-key", apiKey },
         adapterConfig: account.adapter_config
       }
     }

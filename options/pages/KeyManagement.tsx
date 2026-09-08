@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react"
+import { useState, useEffect, useMemo, useRef } from "react"
 import { 
   KeyIcon, 
   MagnifyingGlassIcon, 
@@ -10,9 +10,11 @@ import {
   EyeSlashIcon
 } from "@heroicons/react/24/outline"
 import { useAccountData } from "../../hooks/useAccountData"
-import { fetchAccountTokens, deleteApiToken, fetchTokensTodayUsage, type ApiToken, type TokenTodayUsageMap } from "../../services/apiService"
+import type { ApiToken } from "../../adapters/types"
+import { listAccountKeys, loadAccountKeyUsage, deleteAccountKey, keyForClipboard } from "../../services/tokenManagement"
 import type { DisplaySiteData } from "../../types"
 import AddTokenDialog from "../../components/AddTokenDialog"
+import Sub2ApiKeyDialog from "../../components/Sub2ApiKeyDialog"
 import toast from 'react-hot-toast'
 import { SiteAdapterRegistry } from "../../adapters/SiteAdapterRegistry"
 import { AdapterCapability } from "../../adapters/types"
@@ -21,12 +23,14 @@ export default function KeyManagement({ routeParams }: { routeParams?: Record<st
   const { displayData } = useAccountData()
   const [selectedAccount, setSelectedAccount] = useState<string>("") // 改为空字符串，不默认选择
   const [searchTerm, setSearchTerm] = useState("")
-  const [tokens, setTokens] = useState<(ApiToken & { accountName: string })[]>([])
+  const [tokens, setTokens] = useState<(ApiToken & { accountName: string; accountId: string })[]>([])
   const [isLoading, setIsLoading] = useState(false)
   const [visibleKeys, setVisibleKeys] = useState<Set<number>>(new Set())
   const [isAddTokenOpen, setIsAddTokenOpen] = useState(false)
-  const [editingToken, setEditingToken] = useState<(ApiToken & { accountName: string }) | null>(null)
-  const [tokenUsageMap, setTokenUsageMap] = useState<TokenTodayUsageMap>(new Map())
+  const [editingToken, setEditingToken] = useState<(ApiToken & { accountName: string; accountId: string }) | null>(null)
+  const [tokenUsageMap, setTokenUsageMap] = useState<Map<number, number>>(new Map())
+  const loadVersion = useRef(0)
+  const selectedSiteType = displayData.find(account => account.id === selectedAccount)?.siteType
   const [isLoadingUsage, setIsLoadingUsage] = useState(false)
   const [sortField, setSortField] = useState<'todayUsed' | 'usedQuota'>('todayUsed')
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc')
@@ -45,6 +49,10 @@ export default function KeyManagement({ routeParams }: { routeParams?: Record<st
 
     setIsLoading(true)
     setIsLoadingUsage(true)
+    const version = ++loadVersion.current
+    setTokens([])
+    setTokenUsageMap(new Map())
+    setVisibleKeys(new Set())
     try {
       // 只加载选中账号的密钥
       const account = displayData.find(acc => acc.id === targetAccountId)
@@ -64,45 +72,34 @@ export default function KeyManagement({ routeParams }: { routeParams?: Record<st
         return
       }
 
-      if (!account.token || !account.userId) {
-        toast.error("缺少访问令牌或用户 ID，无法加载密钥列表")
-        setTokens([])
-        setTokenUsageMap(new Map())
-        return
-      }
-
-      // 并行获取密钥列表和今日使用量
-      const [accountTokens, usageMap] = await Promise.all([
-        fetchAccountTokens(
-          account.baseUrl,
-          account.userId,
-          account.token
-        ),
-        fetchTokensTodayUsage(
-          account.baseUrl,
-          account.userId,
-          account.token
-        ).catch((error) => {
-          console.warn("获取密钥今日使用量失败:", error)
-          return new Map() as TokenTodayUsageMap
-        })
-      ])
+      const accountTokens = await listAccountKeys(account.id)
+      if (version !== loadVersion.current) return
 
       const tokensWithAccount = accountTokens.map(token => ({
         ...token,
-        accountName: account.name
+        accountName: account.name,
+        accountId: account.id
       }))
 
       setTokens(tokensWithAccount)
+      setIsLoading(false)
+      const usageMap = await loadAccountKeyUsage(account.id, accountTokens).catch(() => {
+        if (version === loadVersion.current) toast.error("今日用量暂不可用，密钥列表已加载")
+        return new Map<number, number>()
+      })
+      if (version !== loadVersion.current) return
       setTokenUsageMap(usageMap)
     } catch (error) {
+      if (version !== loadVersion.current) return
       console.error(`获取账号密钥失败:`, error)
-      toast.error('加载密钥列表失败')
+      toast.error(error instanceof Error ? error.message : '加载密钥列表失败')
       setTokens([])
       setTokenUsageMap(new Map())
     } finally {
-      setIsLoading(false)
-      setIsLoadingUsage(false)
+      if (version === loadVersion.current) {
+        setIsLoading(false)
+        setIsLoadingUsage(false)
+      }
     }
   }
 
@@ -113,6 +110,7 @@ export default function KeyManagement({ routeParams }: { routeParams?: Record<st
     } else {
       setTokens([]) // 清空密钥列表
     }
+    return () => { loadVersion.current++ }
   }, [selectedAccount, displayData])
 
   // 处理路由参数中的账号ID
@@ -139,8 +137,8 @@ export default function KeyManagement({ routeParams }: { routeParams?: Record<st
       let valueA: number, valueB: number
 
       if (sortField === 'todayUsed') {
-        valueA = tokenUsageMap.get(a.name)?.today_quota_consumption || 0
-        valueB = tokenUsageMap.get(b.name)?.today_quota_consumption || 0
+        valueA = tokenUsageMap.get(a.id) || 0
+        valueB = tokenUsageMap.get(b.id) || 0
       } else {
         valueA = a.used_quota
         valueB = b.used_quota
@@ -153,7 +151,7 @@ export default function KeyManagement({ routeParams }: { routeParams?: Record<st
   // 复制密钥
   const copyKey = async (key: string, name: string) => {
     try {
-      const textToCopy = key.startsWith('sk-') ? key : 'sk-' + key;
+      const textToCopy = keyForClipboard(key, selectedSiteType)
       await navigator.clipboard.writeText(textToCopy)
       toast.success(`密钥 ${name} 已复制到剪贴板`)
     } catch (error) {
@@ -190,26 +188,26 @@ export default function KeyManagement({ routeParams }: { routeParams?: Record<st
   }
 
   // 处理编辑密钥
-  const handleEditToken = (token: ApiToken & { accountName: string }) => {
+  const handleEditToken = (token: ApiToken & { accountName: string; accountId: string }) => {
     setEditingToken(token)
     setIsAddTokenOpen(true)
   }
 
   // 处理删除密钥
-  const handleDeleteToken = async (token: ApiToken & { accountName: string }) => {
+  const handleDeleteToken = async (token: ApiToken & { accountName: string; accountId: string }) => {
     if (!window.confirm(`确定要删除密钥 "${token.name}" 吗？此操作不可撤销。`)) {
       return
     }
 
     try {
       // 找到对应的账号信息
-      const account = displayData.find(acc => acc.name === token.accountName)
+      const account = displayData.find(acc => acc.id === token.accountId)
       if (!account) {
         toast.error('找不到对应账号信息')
         return
       }
 
-      await deleteApiToken(account.baseUrl, account.userId, account.token, token.id)
+      await deleteAccountKey(account.id, token.id)
       toast.success(`密钥 "${token.name}" 删除成功`)
       
       // 重新加载当前选中账号的密钥列表
@@ -218,7 +216,7 @@ export default function KeyManagement({ routeParams }: { routeParams?: Record<st
       }
     } catch (error) {
       console.error('删除密钥失败:', error)
-      toast.error('删除密钥失败，请稍后重试')
+      toast.error(error instanceof Error ? error.message : '删除密钥失败，请稍后重试')
     }
   }
 
@@ -237,16 +235,16 @@ export default function KeyManagement({ routeParams }: { routeParams?: Record<st
   }
 
   // 格式化额度
-  const formatQuota = (quota: number, unlimited: boolean) => {
+  const formatQuota = (quota: number, unlimited: boolean, factor = 500000) => {
     if (unlimited || quota < 0) return '无限额度'
-    return `$${(quota / 500000).toFixed(2)}`
+    return `$${(quota / factor).toFixed(2)}`
   }
 
   // 格式化今日已用额度
-  const formatTodayUsed = (tokenName: string) => {
-    const usage = tokenUsageMap.get(tokenName)
-    if (!usage) return '$0.00'
-    return `$${(usage.today_quota_consumption / 500000).toFixed(2)}`
+  const formatTodayUsed = (token: ApiToken) => {
+    const usage = tokenUsageMap.get(token.id)
+    if (usage === undefined) return '暂不可用'
+    return `$${(usage / (token.quota_conversion_factor ?? 500000)).toFixed(2)}`
   }
 
   return (
@@ -398,7 +396,7 @@ export default function KeyManagement({ routeParams }: { routeParams?: Record<st
                         ? 'bg-green-100 text-green-800' 
                         : 'bg-red-100 text-red-800'
                     }`}>
-                      {token.status === 1 ? '启用' : '禁用'}
+                      {token.status_label || (token.status === 1 ? '启用' : '禁用')}
                     </span>
                     <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
                       {token.accountName}
@@ -430,13 +428,13 @@ export default function KeyManagement({ routeParams }: { routeParams?: Record<st
                       <div className="whitespace-nowrap">
                         <span className="text-gray-500">剩余额度:</span>
                         <span className="ml-2 font-medium">
-                          {formatQuota(token.remain_quota, token.unlimited_quota)}
+                          {formatQuota(token.remain_quota, token.unlimited_quota, token.quota_conversion_factor)}
                         </span>
                       </div>
                       <div className="whitespace-nowrap">
                         <span className="text-gray-500">已用额度:</span>
                         <span className="ml-2 font-medium">
-                          {formatQuota(token.used_quota, false)}
+                          {formatQuota(token.used_quota, false, token.quota_conversion_factor)}
                         </span>
                       </div>
                       <div className="whitespace-nowrap">
@@ -445,7 +443,7 @@ export default function KeyManagement({ routeParams }: { routeParams?: Record<st
                           {isLoadingUsage ? (
                             <span className="animate-pulse">加载中...</span>
                           ) : (
-                            formatTodayUsed(token.name)
+                            formatTodayUsed(token)
                           )}
                         </span>
                       </div>
@@ -518,10 +516,14 @@ export default function KeyManagement({ routeParams }: { routeParams?: Record<st
       </div>
 
       {/* 添加密钥对话框 */}
-      <AddTokenDialog
+      {isAddTokenOpen && selectedSiteType === "sub2api" ? <Sub2ApiKeyDialog
+        accountId={editingToken?.accountId || selectedAccount}
+        keyId={editingToken?.id}
+        onClose={handleCloseAddToken}
+      /> : <AddTokenDialog
         isOpen={isAddTokenOpen}
         onClose={handleCloseAddToken}
-        availableAccounts={tokenCapableAccounts.map(account => ({
+        availableAccounts={tokenCapableAccounts.filter(account => account.siteType !== "sub2api").map(account => ({
           id: account.id,
           name: account.name,
           baseUrl: account.baseUrl,
@@ -530,7 +532,7 @@ export default function KeyManagement({ routeParams }: { routeParams?: Record<st
         }))}
         preSelectedAccountId={selectedAccount || null}
         editingToken={editingToken}
-      />
+      />}
     </div>
   )
 }

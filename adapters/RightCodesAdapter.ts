@@ -22,6 +22,33 @@ type RightCodesMeResponse = {
   is_admin?: number
   created_at?: string
   updated_at?: string
+  // 包月订阅字段（需要验证 API 实际返回）
+  expire_time?: number          // 订阅到期时间戳（秒）
+  subscription_status?: string  // 订阅状态: "active" | "expired" | "cancelled"
+  daily_limit?: number          // 每日额度限制（USD）
+  plan_type?: string            // 套餐类型: "monthly" | "yearly" | "pay-as-you-go"
+  daily_used?: number           // 今日已用额度（USD）
+}
+
+type RightCodesSubscriptionListItem = {
+  id?: number
+  name?: string
+  user_id?: number
+  item_id?: number
+  tier_id?: number
+  total_quota?: number
+  remaining_quota?: number
+  duration_hours?: number
+  expired_at?: string
+  last_reset_at?: string
+  created_at?: string
+  updated_at?: string
+  reset_today?: boolean
+}
+
+type RightCodesSubscriptionsListResponse = {
+  subscriptions?: RightCodesSubscriptionListItem[]
+  total?: number
 }
 
 type RightCodesUsageTrendItem = {
@@ -117,7 +144,6 @@ export class RightCodesAdapter implements ISiteAdapter {
       return { success: false, error: message }
     }
   }
-
   async getAccountBalance(credentials: SiteCredentials): Promise<BalanceInfo> {
     const me =
       credentials.auth.kind === "api-key"
@@ -132,11 +158,69 @@ export class RightCodesAdapter implements ISiteAdapter {
 
     const balance = typeof me.balance === "number" ? me.balance : 0
 
+    const tokenFromCredentials =
+      credentials.auth.kind === "api-key" ? normalizeBearerToken(credentials.auth.apiKey) : ""
+    const token = tokenFromCredentials || normalizeBearerToken(me.user_token)
+
+    let expireTime: number | undefined = undefined
+    let subscriptionStatus: string | undefined = undefined
+    let totalQuota: number | undefined = undefined
+    let usedQuota: number | undefined = undefined
+    let planName: string | undefined = undefined
+    let subscriptionsFetched = false
+
+    try {
+      const list = await this.fetchSubscriptionsList(credentials.siteUrl, token || undefined)
+      subscriptionsFetched = true
+
+      const subscriptions = Array.isArray(list.subscriptions) ? list.subscriptions : []
+      const parsed = subscriptions
+        .map((sub) => {
+          const ms = sub.expired_at ? Date.parse(sub.expired_at) : NaN
+          const expireTime = Number.isFinite(ms) ? Math.floor(ms / 1000) : undefined
+          return { sub, expireTime }
+        })
+        .filter((item): item is { sub: RightCodesSubscriptionListItem; expireTime: number } =>
+          typeof item.expireTime === "number"
+        )
+
+      parsed.sort((a, b) => a.expireTime - b.expireTime)
+
+      const now = Date.now() / 1000
+      const active = parsed.find((item) => item.expireTime > now)
+      const chosen = active ?? (parsed.length > 0 ? parsed[parsed.length - 1] : null)
+      if (chosen) {
+        expireTime = chosen.expireTime
+        subscriptionStatus = expireTime > now ? "active" : "expired"
+        planName = chosen.sub.name
+
+        if (typeof chosen.sub.total_quota === "number") {
+          totalQuota = chosen.sub.total_quota
+        }
+        if (typeof chosen.sub.total_quota === "number" && typeof chosen.sub.remaining_quota === "number") {
+          usedQuota = Math.max(0, chosen.sub.total_quota - chosen.sub.remaining_quota)
+        }
+      }
+    } catch {
+      // ignore subscription fetch errors; balance should still work
+    }
+
+    const extra = subscriptionsFetched
+      ? {
+          expire_time: expireTime,
+          subscription_status: subscriptionStatus,
+          daily_limit: totalQuota,
+          plan_type: planName,
+          daily_used: usedQuota
+        }
+      : undefined
+
     return {
       rawBalance: balance,
       rawUnit: this.metadata.balance.rawUnit,
       conversionFactor: this.metadata.balance.conversionFactor,
-      balanceUSD: balance
+      balanceUSD: balance,
+      extra
     }
   }
 
@@ -181,6 +265,18 @@ export class RightCodesAdapter implements ISiteAdapter {
   }
 
   // ---- private ----
+
+  private async fetchSubscriptionsList(
+    siteUrl: string,
+    token?: string
+  ): Promise<RightCodesSubscriptionsListResponse> {
+    return this.fetchJson<RightCodesSubscriptionsListResponse>(
+      siteUrl,
+      "/subscriptions/list",
+      "rightcodes-subscriptions-list",
+      token
+    )
+  }
 
   private async fetchMe(siteUrl: string, token?: string): Promise<RightCodesMeResponse> {
     return this.fetchJson<RightCodesMeResponse>(siteUrl, "/auth/me", "rightcodes-me", token)

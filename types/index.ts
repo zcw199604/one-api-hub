@@ -14,7 +14,13 @@ export interface AccountInfo {
   today_completion_tokens: number; // 今日 completion_tokens
   today_quota_consumption: number; // 今日消耗 quota
   today_requests_count: number; // 今日请求次数
-  extra?: Record<string, any>; // 适配器扩展字段（可选）
+  // 包月订阅字段（用于 Right.codes 等包月供应商）
+  expire_time?: number;          // 订阅到期时间戳
+  subscription_status?: string;  // 订阅状态
+  daily_limit?: number;          // 每日额度限制
+  plan_type?: string;            // 套餐类型
+  daily_used?: number;           // 今日已用额度
+  extra?: Record<string, unknown>; // 适配器扩展字段（可选）
 }
 
 // 站点账号完整信息
@@ -61,6 +67,19 @@ export type SortOrder = 'asc' | 'desc';
 
 // 货币类型
 export type CurrencyType = 'USD' | 'CNY';
+// BalanceSection 标签页
+export type BalanceTab = 'consumption' | 'balance' | 'subscription';
+
+// 订阅信息（用于包月账号展示）
+export interface SubscriptionInfo {
+  expireTime: number;        // 到期时间戳（秒）
+  daysRemaining: number;     // 剩余天数
+  status?: string;           // 状态
+  dailyLimit?: number;       // 每日限制（USD）
+  dailyUsed?: number;        // 今日已用（USD）
+  planType?: string;         // 套餐类型
+}
+
 
 // 展示用的站点数据 (兼容当前 UI)
 export interface DisplaySiteData {
@@ -76,4 +95,6 @@ export interface DisplaySiteData {
   baseUrl: string; // 站点 URL，用于复制功能
   token: string; // 访问令牌，用于复制功能
   userId: number; // 真实的用户 ID，用于 API 调用
+  // 订阅信息（用于包月账号展示）
+  subscription?: SubscriptionInfo;
 }

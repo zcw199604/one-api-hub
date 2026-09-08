@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import type { BalanceTab } from '../types';
 import { userPreferences, type UserPreferences } from '../services/userPreferences';
 
 /**
@@ -28,7 +29,7 @@ export function useUserPreferences() {
   }, [loadPreferences]);
 
   // 更新活动标签页
-  const updateActiveTab = useCallback(async (activeTab: 'consumption' | 'balance') => {
+  const updateActiveTab = useCallback(async (activeTab: BalanceTab) => {
     try {
       const success = await userPreferences.updateActiveTab(activeTab);
       if (success && preferences) {

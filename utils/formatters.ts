@@ -55,6 +55,32 @@ export const calculateTotalConsumption = (
 }
 
 /**
+ * 计算今日消耗拆分（订阅/按量）
+ */
+export const calculateConsumptionBreakdown = (
+  displayData: DisplaySiteData[]
+) => {
+  type CurrencyKey = 'USD' | 'CNY'
+
+  const subscriptionSites = displayData.filter((site) => Boolean(site.subscription))
+  const payAsYouGoSites = displayData.filter((site) => !site.subscription)
+
+  const sumByCurrency = (sites: DisplaySiteData[], currency: CurrencyKey) =>
+    parseFloat(sites.reduce((sum, site) => sum + site.todayConsumption[currency], 0).toFixed(2))
+
+  return {
+    subscription: {
+      USD: sumByCurrency(subscriptionSites, 'USD'),
+      CNY: sumByCurrency(subscriptionSites, 'CNY')
+    },
+    payAsYouGo: {
+      USD: sumByCurrency(payAsYouGoSites, 'USD'),
+      CNY: sumByCurrency(payAsYouGoSites, 'CNY')
+    }
+  }
+}
+
+/**
  * 计算总余额
  */
 export const calculateTotalBalance = (
