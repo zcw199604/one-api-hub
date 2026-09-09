@@ -170,7 +170,7 @@ export function useUserPreferences() {
 
     // 便捷访问属性
     activeTab: preferences?.activeTab || 'consumption',
-    currencyType: preferences?.currencyType || 'USD',
+    currencyType: preferences?.currencyType || 'CNY',
     sortField: preferences?.sortField || 'name',
     sortOrder: preferences?.sortOrder || 'asc',
     autoRefresh: preferences?.autoRefresh ?? true,

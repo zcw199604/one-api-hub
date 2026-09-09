@@ -15,7 +15,7 @@ interface AddAccountDialogProps {
 
 export default function AddAccountDialog({ isOpen, onClose }: AddAccountDialogProps) {
   const registry = SiteAdapterRegistry.getInstance()
-  const supportedSiteTypes = registry.getSupportedSiteTypes()
+  const supportedSiteTypes = registry.getSupportedSiteTypes().filter(type => type !== "portunex")
 
   const [url, setUrl] = useState("")
   const [siteType, setSiteType] = useState<string>("auto")

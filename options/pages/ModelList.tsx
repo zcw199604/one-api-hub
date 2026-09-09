@@ -45,7 +45,7 @@ export default function ModelList({ routeParams }: { routeParams?: Record<string
   const [dataFormatError, setDataFormatError] = useState<boolean>(false)
   
   // 显示选项
-  const [showRealPrice, setShowRealPrice] = useState(false)
+  const [showRealPrice, setShowRealPrice] = useState(true)
   const [showRatioColumn, setShowRatioColumn] = useState(false)
   const [showEndpointTypes, setShowEndpointTypes] = useState(false)
   

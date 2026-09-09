@@ -29,7 +29,7 @@ const STORAGE_KEYS = {
 // 默认配置
 const DEFAULT_PREFERENCES: UserPreferences = {
   activeTab: 'consumption',
-  currencyType: 'USD',
+  currencyType: 'CNY',
   sortField: 'balance',  // 与 UI_CONSTANTS.SORT.DEFAULT_FIELD 保持一致
   sortOrder: 'desc',     // 与 UI_CONSTANTS.SORT.DEFAULT_ORDER 保持一致
   autoRefresh: true,     // 默认启用自动刷新
