@@ -12,6 +12,7 @@
 - 鉴权：Bearer Token（session token）
 - 余额：`GET https://api.portunex.gewulabs.group/portunex/users/me` → `points`
 - 今日用量：`GET https://api.portunex.gewulabs.group/portunex/users/me/stats` → `total_points_consumed` / `total_input_tokens` / `total_output_tokens` / `total_requests`
+- 定制站统计兼容：仅当上述接口返回 HTTP 404 时，回退到 `GET /api/v1/usage/stats?period=today`，映射 `total_actual_cost` / `total_input_tokens` / `total_output_tokens` / `total_requests`；其他错误及回退失败继续上报，不以零用量掩盖故障。
 
 ## Sub2API
 - 鉴权：用户面板 JWT（Bearer `auth_token`）
@@ -20,6 +21,7 @@
 - 验证：`node --test tests/sub2api-session.test.cjs`；官方依据为 Wei-Shaw/sub2api `772a0382` 的 `frontend/src/api/tokenRefresh.ts`。旧版/定制站点的刷新协议及跨标签页协调需实际验证。
 - 余额：`GET /api/v1/user/profile` → `data.balance`（USD）
 - 自动识别：从已登录页面的 localStorage 读取 `auth_user` / `auth_token`，并用用户资料接口校验。
+- 类型探测：`/api/v1/settings/public` 返回 `code: 0`，且 `site_name`、`version`、`server_timezone` 为字符串；不要求可选的 `available_channels_enabled`，兼容 RouteX 等定制版。
 - 今日用量：`GET /api/v1/usage/dashboard/stats` → `data.today_actual_cost` / `today_input_tokens` / `today_output_tokens` / `today_requests`。
 - Key 管理：`/api/v1/keys`（GET 列表、POST 创建）及 `/api/v1/keys/:id`（GET 详情、PUT 编辑、DELETE 删除）；分页从 1 开始，默认列表加载全部页。分组来自 `/api/v1/groups/available`；今日用量通过 POST `/api/v1/usage/dashboard/api-keys-usage` 按 ID 批量查询。
 - Key 字段：`quota` 是美元总上限，0 表示无限，`quota_used` 是已用金额。映射到通用列表时附带 `quota_conversion_factor: 1`；Sub2API Key 复制时保留原值。创建有效期使用正整数 `expires_in_days`，编辑使用 RFC3339 `expires_at`，空字符串清除到期时间；未编辑的到期时间、状态与分组不发送。

@@ -28,11 +28,17 @@ interface Sub2ApiDashboardStats {
   today_requests?: number
 }
 
+interface Sub2ApiUsageStats {
+  total_actual_cost?: number
+  total_input_tokens?: number
+  total_output_tokens?: number
+  total_requests?: number
+}
+
 interface Sub2ApiPublicSettings {
   site_name?: string
   version?: string
   server_timezone?: string
-  available_channels_enabled?: boolean
 }
 
 interface Sub2ApiResponse<T> {
@@ -124,11 +130,28 @@ export class Sub2ApiAdapter implements ISiteAdapter {
       throw new Error("Sub2API 适配器需要用户面板 JWT（Bearer Token）鉴权")
     }
 
-    const stats = await this.fetchAuthenticated<Sub2ApiDashboardStats>(
-      credentials.siteUrl,
-      "/api/v1/usage/dashboard/stats",
-      credentials.auth.apiKey
-    )
+    let stats: Sub2ApiDashboardStats
+    try {
+      stats = await this.fetchAuthenticated<Sub2ApiDashboardStats>(
+        credentials.siteUrl,
+        "/api/v1/usage/dashboard/stats",
+        credentials.auth.apiKey
+      )
+    } catch (error) {
+      // Some Sub2API deployments expose only the usage page's summary endpoint.
+      if ((error as { status?: number })?.status !== 404) throw error
+      const summary = await this.fetchAuthenticated<Sub2ApiUsageStats>(
+        credentials.siteUrl,
+        "/api/v1/usage/stats?period=today",
+        credentials.auth.apiKey
+      )
+      stats = {
+        today_actual_cost: summary.total_actual_cost,
+        today_input_tokens: summary.total_input_tokens,
+        today_output_tokens: summary.total_output_tokens,
+        today_requests: summary.total_requests
+      }
+    }
 
     return {
       rawConsumption: finiteNumberOrZero(stats.today_actual_cost),
@@ -210,8 +233,8 @@ export class Sub2ApiAdapter implements ISiteAdapter {
         !!settings &&
         typeof settings.site_name === "string" &&
         typeof settings.version === "string" &&
-        typeof settings.server_timezone === "string" &&
-        typeof settings.available_channels_enabled === "boolean"
+        // Channel visibility is optional in older/custom Sub2API deployments.
+        typeof settings.server_timezone === "string"
 
       return detected
         ? { detected: true, siteName: settings.site_name }
@@ -324,7 +347,7 @@ export class Sub2ApiAdapter implements ISiteAdapter {
         const errorPayload = await response.json()
         if (typeof errorPayload.message === "string" && errorPayload.message) message = errorPayload.message
       } catch { /* response may be a proxy error page */ }
-      throw new Error(`HTTP ${response.status}: ${message}`)
+      throw Object.assign(new Error(`HTTP ${response.status}: ${message}`), { status: response.status })
     }
 
     const payload = (await response.json()) as Sub2ApiResponse<T>
