@@ -476,6 +476,12 @@ class AccountStorageService {
 
   private buildCredentialsFromStoredAccount(account: SiteAccount): SiteCredentials {
     const siteType = (account.site_type ?? "one-api").toLowerCase()
+    if (siteType === "claude-code-hub") {
+      return {
+        siteUrl: account.site_url, auth: { kind: "cookie" },
+        adapterConfig: { username: account.account_info.username }
+      }
+    }
     if (siteType === "cubence") {
       return {
         siteUrl: account.site_url,
@@ -585,7 +591,7 @@ export const AccountStorageUtils = {
 
     const hasAccessToken = !!account.account_info?.access_token?.trim()
     const hasApiKey = !!account.account_info?.api_key?.trim()
-    if (!hasAccessToken && !hasApiKey) {
+    if (!hasAccessToken && !hasApiKey && account.site_type !== "claude-code-hub") {
       errors.push('访问令牌或 API Key 不能为空');
     }
 

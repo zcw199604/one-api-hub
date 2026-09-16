@@ -3,6 +3,7 @@ import {
   handleAutoRefreshMessage
 } from "./services/autoRefreshService"
 import { recoverSub2ApiSessionInPage, setSub2ApiBackgroundRecovery } from "./services/sub2apiSession"
+import { readClaudeCodeHubQuotaInPage, setClaudeCodeHubQuotaReader } from "./services/claudeCodeHubSession"
 
 // 管理临时窗口的 Map
 const tempWindows = new Map<string, number>()
@@ -21,6 +22,15 @@ chrome.runtime.onInstalled.addListener(async () => {
 
 // 处理来自 popup 的消息
 chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
+  if (request.action === "readClaudeCodeHubQuota") {
+    if (_sender.id !== chrome.runtime.id ||
+        (_sender.tab && !_sender.url?.startsWith(`chrome-extension://${chrome.runtime.id}/`))) {
+      sendResponse({ success: false, error: "不允许的配额读取来源" })
+      return false
+    }
+    handleClaudeCodeHubQuota(request.url).then(sendResponse)
+    return true
+  }
   if (request.action === "recoverSub2ApiSession") {
     // Only extension pages/background may request credential recovery.
     if (_sender.id !== chrome.runtime.id ||
@@ -70,6 +80,38 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
 })
 
 const sub2ApiRecoveries = new Map<string, Promise<any>>()
+setClaudeCodeHubQuotaReader(handleClaudeCodeHubQuota)
+
+async function handleClaudeCodeHubQuota(url: string) {
+  let temporaryWindowId: number | undefined
+  try {
+    const origin = new URL(url).origin
+    if (!origin.startsWith("https://")) throw new Error("配额读取需要 HTTPS 站点")
+    const tabs = await chrome.tabs.query({})
+    let tabId = tabs.find(tab => {
+      try { return !!tab.id && new URL(tab.url || "").origin === origin }
+      catch { return false }
+    })?.id
+    if (!tabId) {
+      const window = await chrome.windows.create({ url: origin, type: "popup", focused: false, width: 800, height: 600 })
+      temporaryWindowId = window.id
+      tabId = window.tabs?.[0]?.id
+    }
+    if (!tabId) throw new Error("无法打开站点页面")
+    await waitForTabComplete(tabId)
+    const results = await chrome.scripting.executeScript({
+      target: { tabId }, world: "MAIN", func: readClaudeCodeHubQuotaInPage, args: [origin]
+    })
+    return results[0]?.result || { success: false, error: "页面未返回配额" }
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : "读取配额失败" }
+  } finally {
+    if (temporaryWindowId !== undefined) {
+      try { await chrome.windows.remove(temporaryWindowId) } catch { /* already closed */ }
+    }
+  }
+}
+
 setSub2ApiBackgroundRecovery(handleSub2ApiRecovery)
 
 async function handleSub2ApiRecovery(request: {

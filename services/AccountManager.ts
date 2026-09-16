@@ -443,6 +443,12 @@ export class AccountManager {
 
   private buildCredentialsFromStoredAccount(account: SiteAccount): SiteCredentials {
     const siteType = this.getAccountSiteType(account)
+    if (siteType === "claude-code-hub") {
+      return {
+        siteUrl: account.site_url, auth: { kind: "cookie" },
+        adapterConfig: { username: account.account_info.username }
+      }
+    }
     if (siteType === "cubence") {
       return {
         siteUrl: account.site_url,
@@ -517,6 +523,13 @@ export class AccountManager {
     username: string
     accountInfoSeed: any
   } {
+    if (adapterId === "claude-code-hub") {
+      const username = params.username?.trim() || ""
+      return {
+        credentials: { siteUrl, auth: { kind: "cookie" }, adapterConfig: { username } },
+        username, accountInfoSeed: {}
+      }
+    }
     if (adapterId === "cubence") {
       return {
         credentials: { siteUrl, auth: { kind: "cookie" } },

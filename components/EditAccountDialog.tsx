@@ -578,8 +578,8 @@ export default function EditAccountDialog({ isOpen, onClose, account }: EditAcco
                         </div>
                         <input
                           type="number"
-                          step="0.1"
-                          min="0.1"
+                          step="0.01"
+                          min="0.01"
                           max="100"
                           value={exchangeRate}
                           onChange={(e) => setExchangeRate(e.target.value)}
@@ -600,7 +600,7 @@ export default function EditAccountDialog({ isOpen, onClose, account }: EditAcco
                       </p>
                       {!isValidExchangeRate(exchangeRate) && exchangeRate && (
                         <p className="mt-1 text-xs text-red-600">
-                          请输入有效的汇率 (0.1 - 100)
+                          请输入有效的汇率 (0.01 - 100)
                         </p>
                       )}
                     </div>
