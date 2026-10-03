@@ -456,6 +456,9 @@ export class AccountManager {
         adapterConfig: (account as any).adapter_config
       }
     }
+    if (siteType === "ahmes") {
+      return { siteUrl: account.site_url, auth: { kind: "cookie" }, adapterConfig: { username: account.account_info.username } }
+    }
 
     if (siteType === "portunex") {
       const accountInfo: any = account.account_info
@@ -536,6 +539,9 @@ export class AccountManager {
         username: params.username?.trim() || "",
         accountInfoSeed: {}
       }
+    }
+    if (adapterId === "ahmes") {
+      return { credentials: { siteUrl, auth: { kind: "cookie" }, adapterConfig: { username: params.username?.trim() || "" } }, username: params.username?.trim() || "", accountInfoSeed: {} }
     }
 
     if (adapterId === "portunex") {

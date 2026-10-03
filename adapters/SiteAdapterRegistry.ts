@@ -7,6 +7,7 @@ import { PortunexAdapter } from "./PortunexAdapter"
 import { RightCodesAdapter } from "./RightCodesAdapter"
 import { Sub2ApiAdapter } from "./Sub2ApiAdapter"
 import { ClaudeCodeHubAdapter } from "./ClaudeCodeHubAdapter"
+import { AhmesAdapter } from "./AhmesAdapter"
 
 export class SiteAdapterRegistry {
   private static instance: SiteAdapterRegistry | null = null
@@ -98,6 +99,7 @@ export class SiteAdapterRegistry {
     this.registerAdapter(new PortunexAdapter())
     this.registerAdapter(new Sub2ApiAdapter())
     this.registerAdapter(new ClaudeCodeHubAdapter())
+    this.registerAdapter(new AhmesAdapter())
   }
 
   private normalizeSiteType(siteType: string): string {

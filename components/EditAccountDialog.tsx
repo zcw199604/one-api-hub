@@ -40,6 +40,7 @@ export default function EditAccountDialog({ isOpen, onClose, account }: EditAcco
       const host = new URL(url).hostname.toLowerCase()
       if (host === "cubence.com" || host.endsWith(".cubence.com")) return "cubence"
       if (host === "right.codes" || host.endsWith(".right.codes")) return "right.codes"
+      if (host === "ahmes.dev" || host.endsWith(".ahmes.dev")) return "ahmes"
     } catch {
       // ignore
     }

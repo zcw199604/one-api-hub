@@ -489,6 +489,9 @@ class AccountStorageService {
         adapterConfig: account.adapter_config
       }
     }
+    if (siteType === "ahmes") {
+      return { siteUrl: account.site_url, auth: { kind: "cookie" }, adapterConfig: { username: account.account_info.username } }
+    }
 
     if (siteType === "portunex") {
       const apiKey = account.account_info?.api_key
@@ -591,7 +594,7 @@ export const AccountStorageUtils = {
 
     const hasAccessToken = !!account.account_info?.access_token?.trim()
     const hasApiKey = !!account.account_info?.api_key?.trim()
-    if (!hasAccessToken && !hasApiKey && account.site_type !== "claude-code-hub") {
+    if (!hasAccessToken && !hasApiKey && account.site_type !== "claude-code-hub" && account.site_type !== "ahmes") {
       errors.push('访问令牌或 API Key 不能为空');
     }
 

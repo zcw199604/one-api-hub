@@ -22,6 +22,12 @@
 - 总额度无限/未设置、字段异常或登录用户名发生变化时提示错误，不将其当成零余额。新增和编辑账号的充值比例输入步长为 0.01，最小值 0.01。
 - 验证：`node --test tests/claude-code-hub.test.cjs`，覆盖识别、Cookie 回退、用户级余额、保存及两个刷新入口、倍率换算与异常数据。
 
+## Ahmes
+- 鉴权：Ahmes 页面 `localStorage` 的 `prism.token`，只在 Ahmes 页面 MAIN world 读取并作为 Bearer Token 调用只读接口，不保存 Token。
+- 账号：`GET /api/me`，用户名使用 `email`；余额：`GET /api/wallet` 的 `balance_micros`，按 1,000,000 微积分换算。
+- 今日用量：`GET /api/usage/daily?days=1` 的首条记录，映射 `cost_micros`、`input_tokens`、`output_tokens`、`requests`。
+- 身份保护：刷新时校验已保存邮箱，浏览器切换 Ahmes 账号会拒绝更新。
+
 ## Sub2API
 - 鉴权：用户面板 JWT（Bearer `auth_token`）
 - 续期：两个账号刷新入口共用 `fetchAccountSnapshot`，只在 401 时经后台在站点 MAIN world 恢复凭据；后台自身调用直接处理，扩展页面通过消息调用。同源使用官方 `sub2api-auth-token-refresh` Web Lock 协调轮换。优先采用网页新 Token，否则 POST `/api/v1/auth/refresh`；按官方顺序更新站点 `auth_token` / `token_expires_at` / `refresh_token`，扩展仅保存经过用户资料接口校验的访问 Token，随后重试一次。
