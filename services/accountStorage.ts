@@ -35,11 +35,19 @@ const DEFAULT_CONFIG: StorageConfig = {
 
 class AccountStorageService {
   private storage: Storage;
+  // 串行写队列：所有「读取-修改-写回」操作排队执行，避免并行刷新时互相覆盖
+  private writeQueue: Promise<unknown> = Promise.resolve();
 
   constructor() {
     this.storage = new Storage({
       area: "local"
     });
+  }
+
+  private enqueueWrite<T>(task: () => Promise<T>): Promise<T> {
+    const result = this.writeQueue.then(task, task);
+    this.writeQueue = result.catch(() => undefined);
+    return result;
   }
 
   /**
@@ -86,7 +94,11 @@ class AccountStorageService {
   /**
    * 添加新账号
    */
-  async addAccount(accountData: Omit<SiteAccount, 'id' | 'created_at' | 'updated_at'>): Promise<string> {
+  addAccount(accountData: Omit<SiteAccount, 'id' | 'created_at' | 'updated_at'>): Promise<string> {
+    return this.enqueueWrite(() => this.addAccountUnsafe(accountData));
+  }
+
+  private async addAccountUnsafe(accountData: Omit<SiteAccount, 'id' | 'created_at' | 'updated_at'>): Promise<string> {
     try {
       console.log('[AccountStorage] 开始添加新账号:', accountData.site_name);
       const accounts = await this.getAllAccounts();
@@ -125,7 +137,11 @@ class AccountStorageService {
   /**
    * 更新账号信息
    */
-  async updateAccount(id: string, updates: Partial<Omit<SiteAccount, 'id' | 'created_at'>>): Promise<boolean> {
+  updateAccount(id: string, updates: Partial<Omit<SiteAccount, 'id' | 'created_at'>>): Promise<boolean> {
+    return this.enqueueWrite(() => this.updateAccountUnsafe(id, updates));
+  }
+
+  private async updateAccountUnsafe(id: string, updates: Partial<Omit<SiteAccount, 'id' | 'created_at'>>): Promise<boolean> {
     try {
       const accounts = await this.getAllAccounts();
       const index = accounts.findIndex(account => account.id === id);
@@ -151,7 +167,11 @@ class AccountStorageService {
   /**
    * 删除账号
    */
-  async deleteAccount(id: string): Promise<boolean> {
+  deleteAccount(id: string): Promise<boolean> {
+    return this.enqueueWrite(() => this.deleteAccountUnsafe(id));
+  }
+
+  private async deleteAccountUnsafe(id: string): Promise<boolean> {
     try {
       const accounts = await this.getAllAccounts();
       const filteredAccounts = accounts.filter(account => account.id !== id);
