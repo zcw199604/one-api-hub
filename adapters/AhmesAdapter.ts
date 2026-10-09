@@ -1,6 +1,7 @@
 import type { ISiteAdapter } from "./ISiteAdapter"
 import { AdapterCapability, type AutoDetectResult, type BalanceInfo, type SiteCredentials, type SiteStatusInfo, type UsageStats, type ValidateResult } from "./types"
 import { readAhmesSnapshot } from "../services/ahmesSession"
+import { getRevenueDate } from "../utils/siteRevenue"
 
 export class AhmesAdapter implements ISiteAdapter {
   readonly metadata = {
@@ -37,9 +38,32 @@ export class AhmesAdapter implements ISiteAdapter {
     return { rawConsumption: today.cost_micros, rawUnit: "micro_points", conversionFactor: 1_000_000, promptTokens: today.input_tokens ?? 0, completionTokens: today.output_tokens ?? 0, requestCount: today.requests ?? 0 }
   }
 
-  private async fetchSnapshot(siteUrl: string, expectedUsername?: string) {
+  // 站点按天返回用量（最近 N 天），按其 date 字段落在区间内的行求和。
+  async getRangeUsageStats(credentials: SiteCredentials, timeRange: { start: number; end: number }): Promise<UsageStats> {
+    const startDate = getRevenueDate(new Date(timeRange.start * 1000))
+    const endDate = getRevenueDate(new Date(timeRange.end * 1000))
+    const today = new Date()
+    const days = Math.round((new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime() -
+      new Date(timeRange.start * 1000).setHours(0, 0, 0, 0)) / 86_400_000) + 1
+    if (days < 1 || days > 366) throw new Error("Ahmes 仅支持查询最近 366 天内的用量")
+    const snapshot = await this.fetchSnapshot(credentials.siteUrl, credentials.adapterConfig?.username, days)
+    const sum = { cost: 0, input: 0, output: 0, requests: 0 }
+    for (const row of snapshot.daily) {
+      if (typeof row?.date !== "string") throw new Error("Ahmes 每日用量格式异常")
+      const date = row.date.slice(0, 10)
+      if (date < startDate || date > endDate) continue
+      if (typeof row.cost_micros !== "number" || !Number.isFinite(row.cost_micros)) throw new Error("Ahmes 每日用量格式异常")
+      sum.cost += row.cost_micros
+      sum.input += row.input_tokens ?? 0
+      sum.output += row.output_tokens ?? 0
+      sum.requests += row.requests ?? 0
+    }
+    return { rawConsumption: sum.cost, rawUnit: "micro_points", conversionFactor: 1_000_000, promptTokens: sum.input, completionTokens: sum.output, requestCount: sum.requests }
+  }
+
+  private async fetchSnapshot(siteUrl: string, expectedUsername?: string, days = 1) {
     if (!siteUrl.trim()) throw new Error("Ahmes 站点地址不能为空")
-    const result = await readAhmesSnapshot(new URL(siteUrl).origin)
+    const result = await readAhmesSnapshot(new URL(siteUrl).origin, days)
     if (!result || typeof result.success !== "boolean") throw new Error("插件后台未返回 Ahmes 数据，请重新加载插件后重试")
     if (!result.success || !result.data) throw new Error(result.error || "读取 Ahmes 数据失败")
     const username = this.username(result.data.me)

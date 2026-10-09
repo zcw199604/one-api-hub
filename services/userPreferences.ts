@@ -251,7 +251,7 @@ export const UserPreferencesUtils = {
     switch (tab) {
       case 'consumption': return '今日消耗';
       case 'balance': return '总余额';
-      case 'revenue': return '今日营收';
+      case 'revenue': return '营收统计';
       case 'subscription': return '订阅信息';
       default: return '未知';
     }

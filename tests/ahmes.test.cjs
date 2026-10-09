@@ -36,3 +36,22 @@ test('rejects a switched account', async () => {
   } } }
   assert.match((await adapter().validateConnection(credentials)).message, /浏览器登录账号已变化/)
 })
+
+test('range usage requests enough days and sums only rows inside the range', async () => {
+  const key = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  const day = offset => { const d = new Date(); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() - offset); return d }
+  let requestedDays
+  global.chrome = { runtime: { sendMessage: async request => {
+    requestedDays = request.days
+    return { success: true, data: { me: { email: credentials.adapterConfig.username }, wallet: { balance_micros: 1 },
+      daily: [0, 1, 2, 3, 4, 5, 6, 7].map(i => ({ date: key(day(i)), requests: 1, input_tokens: 10, output_tokens: 20, cost_micros: 1_000_000 })) } }
+  } } }
+  const range = { start: Math.floor(day(6).getTime() / 1000), end: Math.floor(day(0).getTime() / 1000) + 86399 }
+  const usage = await adapter().getRangeUsageStats(credentials, range)
+  assert.equal(requestedDays, 7)
+  assert.equal(usage.rawConsumption, 7_000_000)
+  assert.equal(usage.requestCount, 7)
+  global.chrome = { runtime: { sendMessage: async () => ({ success: true, data: { me: { email: credentials.adapterConfig.username }, wallet: {}, daily: [{ cost_micros: 1 }] } }) } }
+  await assert.rejects(adapter().getRangeUsageStats(credentials, range), /格式异常/)
+  await assert.rejects(adapter().getRangeUsageStats(credentials, { start: 1, end: 2 }), /366/)
+})

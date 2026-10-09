@@ -26,7 +26,12 @@ test('admin revenue uses Sub2API actual cost and admin UI request header', async
   }
   const adapter = new Sub2ApiAdapter()
   assert.equal(await adapter.checkRevenueAccess(credentials), 10)
-  assert.deepEqual(await adapter.getSiteRevenue(credentials, { start: 1, end: 2 }), { rawQuota: 18.5 })
+  const today = new Date()
+  const todayRange = {
+    start: Math.floor(new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime() / 1000),
+    end: Math.floor(new Date(today.getFullYear(), today.getMonth(), today.getDate(), 23, 59, 59).getTime() / 1000)
+  }
+  assert.deepEqual(await adapter.getSiteRevenue(credentials, todayRange), { rawQuota: 18.5 })
   assert.deepEqual(calls, ['/api/v1/user/profile', '/api/v1/user/profile', '/api/v1/admin/dashboard/stats'])
 })
 

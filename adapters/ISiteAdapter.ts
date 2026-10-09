@@ -21,6 +21,7 @@ export interface ISiteAdapter {
 
   getAccountBalance?(credentials: SiteCredentials): Promise<BalanceInfo>
   getUsageStats?(credentials: SiteCredentials, timeRange: TimeRange): Promise<UsageStats>
+  getRangeUsageStats?(credentials: SiteCredentials, timeRange: TimeRange): Promise<UsageStats>
   checkRevenueAccess?(credentials: SiteCredentials): Promise<number>
   getSiteRevenue?(credentials: SiteCredentials, timeRange: TimeRange): Promise<{ rawQuota: number }>
 

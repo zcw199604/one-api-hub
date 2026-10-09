@@ -1,20 +1,37 @@
 type QuotaResult = { success: boolean; data?: unknown; error?: string }
-let backgroundReader: ((url: string) => Promise<QuotaResult>) | undefined
+export type ClaudeCodeHubStatsRange = { startTime: number; endTime: number } // 毫秒时间戳
+let backgroundReader: ((url: string, stats?: ClaudeCodeHubStatsRange) => Promise<QuotaResult>) | undefined
 
 export function setClaudeCodeHubQuotaReader(reader: NonNullable<typeof backgroundReader>) {
   backgroundReader = reader
 }
 
-export function readClaudeCodeHubQuota(url: string): Promise<QuotaResult> {
-  return backgroundReader ? backgroundReader(url) : chrome.runtime.sendMessage({
-    action: "readClaudeCodeHubQuota", url
+export function readClaudeCodeHubQuota(url: string, stats?: ClaudeCodeHubStatsRange): Promise<QuotaResult> {
+  return backgroundReader ? backgroundReader(url, stats) : chrome.runtime.sendMessage({
+    action: "readClaudeCodeHubQuota", url, stats
   })
 }
 
-// Injected into MAIN world. Only this fixed, read-only action can be requested.
-export async function readClaudeCodeHubQuotaInPage(origin: string): Promise<QuotaResult> {
+// Injected into MAIN world. Only these fixed, read-only actions can be requested.
+export async function readClaudeCodeHubQuotaInPage(origin: string, stats?: ClaudeCodeHubStatsRange): Promise<QuotaResult> {
   try {
     if (location.origin !== origin) throw new Error("站点发生跳转，无法读取配额")
+    if (stats) {
+      if (!Number.isSafeInteger(stats.startTime) || !Number.isSafeInteger(stats.endTime) || stats.startTime >= stats.endTime) {
+        throw new Error("统计时间范围无效")
+      }
+      const params = new URLSearchParams({
+        startTime: String(stats.startTime), endTime: String(stats.endTime), excludeStatusCode200: "false"
+      })
+      const summary = await fetch(`${origin}/api/v1/usage-logs/stats?${params}`, {
+        method: "GET", credentials: "include", redirect: "error", cache: "no-store",
+        headers: { Accept: "application/json" }, signal: AbortSignal.timeout(15000)
+      })
+      if (!summary.ok) {
+        throw new Error(`HTTP ${summary.status}: ${summary.status === 401 ? "登录已失效，请重新登录站点" : "用量统计接口请求失败"}`)
+      }
+      return { success: true, data: await summary.json() }
+    }
     const response = await fetch(`${origin}/api/actions/my-usage/getMyQuota`, {
       method: "POST", credentials: "include", redirect: "error",
       headers: { "Content-Type": "application/json" }, body: "{}",

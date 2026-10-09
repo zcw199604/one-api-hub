@@ -475,6 +475,25 @@ export const fetchSiteRevenue = async (
   return { rawQuota: data.quota }
 }
 
+export const fetchSelfConsumption = async (
+  baseUrl: string, userId: number, accessToken: string,
+  timeRange: { start: number; end: number }
+): Promise<{ rawQuota: number }> => {
+  const params = new URLSearchParams({
+    type: "2",
+    start_timestamp: String(timeRange.start),
+    end_timestamp: String(timeRange.end)
+  })
+  const data = await apiRequest<{ quota?: number }>(
+    `${baseUrl.replace(/\/+$/, "")}/api/log/self/stat?${params}`,
+    createTokenAuthRequest(userId, accessToken), "/api/log/self/stat"
+  )
+  if (typeof data?.quota !== "number" || !Number.isFinite(data.quota) || data.quota < 0) {
+    throw new Error("个人消耗数据格式异常")
+  }
+  return { rawQuota: data.quota }
+}
+
 /**
  * 获取今日使用情况
  */

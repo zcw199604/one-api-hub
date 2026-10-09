@@ -12,7 +12,8 @@ import type {
 import { SiteAdapterRegistry } from "../adapters/SiteAdapterRegistry"
 import type { SiteCredentials, TimeRange } from "../adapters/types"
 import { fetchAccountSnapshot } from "./fetchAccountSnapshot"
-import { fetchRevenueSnapshot } from "./siteRevenue"
+import { fetchRevenueRangeReport, fetchRevenueSnapshot, getQuotaFactor } from "./siteRevenue"
+import { readLedger, recordRefreshToLedger, removeAccountFromLedger } from "./dailyLedger"
 import { getDisplayRevenue, getRevenueDate } from "../utils/siteRevenue"
 
 type RightCodesBalanceExtra = {
@@ -184,6 +185,7 @@ class AccountStorageService {
       }
 
       await this.saveAccounts(filteredAccounts);
+      await removeAccountFromLedger(id);
       return true;
     } catch (error) {
       console.error('删除账号失败:', error);
@@ -274,6 +276,12 @@ class AccountStorageService {
 
       // 更新账号信息
       const updateSuccess = await this.updateAccount(id, updateData);
+      if (updateSuccess) {
+        await recordRefreshToLedger({
+          account, factor: getQuotaFactor(adapter), date: getRevenueDate(new Date(timeRange.start * 1000)),
+          consumptionRaw: usage ? usage.rawConsumption : null, revenue: updateData.revenue
+        })
+      }
       
       // 记录健康状态变化
       if (account.health_status !== updateData.health_status) {
@@ -496,6 +504,12 @@ class AccountStorageService {
     
     await this.storage.set(STORAGE_KEYS.ACCOUNTS, config);
     console.log('[AccountStorage] 账号数据保存完成');
+  }
+
+  async fetchRevenueRangeReport(range: TimeRange) {
+    return fetchRevenueRangeReport(
+      await this.getAllAccounts(), range, account => this.buildCredentialsFromStoredAccount(account), await readLedger()
+    )
   }
 
   private getTodayTimeRange(): TimeRange {

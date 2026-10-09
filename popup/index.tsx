@@ -14,7 +14,8 @@ import AddAccountDialog from "../components/AddAccountDialog"
 import EditAccountDialog from "../components/EditAccountDialog"
 import { accountStorage } from "../services/accountStorage"
 import type { DisplaySiteData, SubscriptionInfo } from "../types"
-import { calculateRevenueSummary, getRevenueSites, getBalanceTabs } from "../utils/siteRevenue"
+import { buildRangeRevenueView, buildTodayRevenueView, getRevenueSites, getBalanceTabs } from "../utils/siteRevenue"
+import { useRevenueRange } from "../hooks/useRevenueRange"
 
 function IndexPopup() {
   // 用户偏好设置管理
@@ -88,7 +89,11 @@ function IndexPopup() {
     return subscriptions[0]
   }, [displayData])
   const revenueSites = useMemo(() => getRevenueSites(displayData), [displayData])
-  const revenueSummary = useMemo(() => calculateRevenueSummary(displayData), [displayData])
+  const revenueRange = useRevenueRange(activeTab === 'revenue', lastUpdateTime.getTime())
+  const revenueView = useMemo(() => {
+    if (revenueRange.preset === 'today') return buildTodayRevenueView(displayData, totalConsumption)
+    return revenueRange.state.report ? buildRangeRevenueView(revenueRange.state.report, displayData) : undefined
+  }, [displayData, totalConsumption, revenueRange.preset, revenueRange.state.report])
   const balanceTabs = useMemo(() => getBalanceTabs(revenueSites.length > 0, Boolean(subscription)), [revenueSites.length, subscription])
   useEffect(() => {
     if (!isInitialLoad && !preferencesLoading && !balanceTabs.includes(activeTab)) {
@@ -290,7 +295,8 @@ function IndexPopup() {
             consumptionBreakdown={consumptionBreakdown}
             totalBalance={totalBalance}
             revenueSites={revenueSites}
-            revenueSummary={revenueSummary}
+            revenueView={revenueView}
+            revenueRange={revenueRange}
             todayTokens={todayTokens}
             currencyType={currencyType}
             activeTab={activeTab}

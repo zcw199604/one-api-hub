@@ -1,5 +1,6 @@
 // Sub2API 站点适配器：通过用户面板 JWT 获取账号、余额和今日用量。
 import type { ISiteAdapter } from "./ISiteAdapter"
+import { getRevenueDate } from "../utils/siteRevenue"
 import { mapSub2ApiKey, type Sub2ApiKey, type Sub2ApiKeyInput, type Sub2ApiKeyUsage } from "./sub2apiKeys"
 import {
   AdapterCapability,
@@ -38,6 +39,24 @@ interface Sub2ApiUsageStats {
 
 interface Sub2ApiAdminDashboardStats {
   today_actual_cost?: number
+}
+
+const isTodayRange = (range: { start: number; end: number }) => {
+  const today = getRevenueDate()
+  return getRevenueDate(new Date(range.start * 1000)) === today && getRevenueDate(new Date(range.end * 1000)) === today
+}
+
+// Sub2API 的统计接口按 YYYY-MM-DD 闭区间并按 timezone 解释日期。
+const buildDateRangeQuery = (range: { start: number; end: number }) =>
+  new URLSearchParams({
+    start_date: getRevenueDate(new Date(range.start * 1000)),
+    end_date: getRevenueDate(new Date(range.end * 1000)),
+    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone
+  }).toString()
+
+const parseCost = (value: unknown, message: string): number => {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) throw new Error(message)
+  return value
 }
 
 interface Sub2ApiPublicSettings {
@@ -181,23 +200,49 @@ export class Sub2ApiAdapter implements ISiteAdapter {
     return 10
   }
 
-  async getSiteRevenue(credentials: SiteCredentials, _timeRange: { start: number; end: number }) {
+  async getSiteRevenue(credentials: SiteCredentials, timeRange: { start: number; end: number }) {
     await this.checkRevenueAccess(credentials)
     if (credentials.auth.kind !== "api-key") {
       throw new Error("Sub2API 营收统计需要用户面板 JWT（Bearer Token）鉴权")
     }
 
-    const stats = await this.fetchAuthenticated<Sub2ApiAdminDashboardStats>(
+    // 仅当天沿用管理端看板；其它区间走管理端用量统计（按日期闭区间）。
+    if (isTodayRange(timeRange)) {
+      const stats = await this.fetchAuthenticated<Sub2ApiAdminDashboardStats>(
+        credentials.siteUrl,
+        "/api/v1/admin/dashboard/stats",
+        credentials.auth.apiKey,
+        { method: "GET", adminRequest: true }
+      )
+      return { rawQuota: parseCost(stats.today_actual_cost, "Sub2API 站点营收数据格式异常") }
+    }
+
+    const stats = await this.fetchAuthenticated<Sub2ApiUsageStats>(
       credentials.siteUrl,
-      "/api/v1/admin/dashboard/stats",
+      `/api/v1/admin/usage/stats?${buildDateRangeQuery(timeRange)}`,
       credentials.auth.apiKey,
       { method: "GET", adminRequest: true }
     )
-    const rawQuota = stats.today_actual_cost
-    if (typeof rawQuota !== "number" || !Number.isFinite(rawQuota) || rawQuota < 0) {
-      throw new Error("Sub2API 站点营收数据格式异常")
+    return { rawQuota: parseCost(stats.total_actual_cost, "Sub2API 站点营收数据格式异常") }
+  }
+
+  async getRangeUsageStats(credentials: SiteCredentials, timeRange: { start: number; end: number }): Promise<UsageStats> {
+    if (credentials.auth.kind !== "api-key") {
+      throw new Error("Sub2API 适配器需要用户面板 JWT（Bearer Token）鉴权")
     }
-    return { rawQuota }
+    const stats = await this.fetchAuthenticated<Sub2ApiUsageStats>(
+      credentials.siteUrl,
+      `/api/v1/usage/stats?${buildDateRangeQuery(timeRange)}`,
+      credentials.auth.apiKey
+    )
+    return {
+      rawConsumption: parseCost(stats.total_actual_cost, "Sub2API 用量数据格式异常"),
+      rawUnit: this.metadata.balance.rawUnit,
+      conversionFactor: this.metadata.balance.conversionFactor,
+      promptTokens: finiteNumberOrZero(stats.total_input_tokens),
+      completionTokens: finiteNumberOrZero(stats.total_output_tokens),
+      requestCount: finiteNumberOrZero(stats.total_requests)
+    }
   }
 
   async autoDetectAccount(siteUrl: string): Promise<AutoDetectResult> {

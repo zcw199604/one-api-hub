@@ -3,7 +3,7 @@ import {
   handleAutoRefreshMessage
 } from "./services/autoRefreshService"
 import { recoverSub2ApiSessionInPage, setSub2ApiBackgroundRecovery } from "./services/sub2apiSession"
-import { readClaudeCodeHubQuotaInPage, setClaudeCodeHubQuotaReader } from "./services/claudeCodeHubSession"
+import { readClaudeCodeHubQuotaInPage, setClaudeCodeHubQuotaReader, type ClaudeCodeHubStatsRange } from "./services/claudeCodeHubSession"
 import { readAhmesSnapshotInPage, setAhmesSnapshotReader } from "./services/ahmesSession"
 
 // 管理临时窗口的 Map
@@ -29,14 +29,14 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
       sendResponse({ success: false, error: "不允许的配额读取来源" })
       return false
     }
-    handleClaudeCodeHubQuota(request.url).then(sendResponse)
+    handleClaudeCodeHubQuota(request.url, request.stats).then(sendResponse)
     return true
   }
   if (request.action === "readAhmesSnapshot") {
     if (_sender.id !== chrome.runtime.id || (_sender.tab && !_sender.url?.startsWith(`chrome-extension://${chrome.runtime.id}/`))) {
       sendResponse({ success: false, error: "不允许的 Ahmes 数据读取来源" }); return false
     }
-    handleAhmesSnapshot(request.url).then(sendResponse); return true
+    handleAhmesSnapshot(request.url, request.days).then(sendResponse); return true
   }
   if (request.action === "recoverSub2ApiSession") {
     // Only extension pages/background may request credential recovery.
@@ -90,7 +90,7 @@ const sub2ApiRecoveries = new Map<string, Promise<any>>()
 setClaudeCodeHubQuotaReader(handleClaudeCodeHubQuota)
 setAhmesSnapshotReader(handleAhmesSnapshot)
 
-async function handleAhmesSnapshot(url: string) {
+async function handleAhmesSnapshot(url: string, days = 1) {
   let temporaryWindowId: number | undefined
   try {
     const origin = new URL(url).origin
@@ -100,13 +100,13 @@ async function handleAhmesSnapshot(url: string) {
     if (!tabId) { const window = await chrome.windows.create({ url: origin, type: "popup", focused: false, width: 800, height: 600 }); temporaryWindowId = window.id; tabId = window.tabs?.[0]?.id }
     if (!tabId) throw new Error("无法打开 Ahmes 页面")
     await waitForTabComplete(tabId)
-    const results = await chrome.scripting.executeScript({ target: { tabId }, world: "MAIN", func: readAhmesSnapshotInPage, args: [origin] })
+    const results = await chrome.scripting.executeScript({ target: { tabId }, world: "MAIN", func: readAhmesSnapshotInPage, args: [origin, days] })
     return results[0]?.result || { success: false, error: "Ahmes 页面未返回数据" }
   } catch (error) { return { success: false, error: error instanceof Error ? error.message : "读取 Ahmes 数据失败" } }
   finally { if (temporaryWindowId !== undefined) { try { await chrome.windows.remove(temporaryWindowId) } catch {} } }
 }
 
-async function handleClaudeCodeHubQuota(url: string) {
+async function handleClaudeCodeHubQuota(url: string, stats?: ClaudeCodeHubStatsRange) {
   let temporaryWindowId: number | undefined
   try {
     const origin = new URL(url).origin
@@ -124,7 +124,7 @@ async function handleClaudeCodeHubQuota(url: string) {
     if (!tabId) throw new Error("无法打开站点页面")
     await waitForTabComplete(tabId)
     const results = await chrome.scripting.executeScript({
-      target: { tabId }, world: "MAIN", func: readClaudeCodeHubQuotaInPage, args: [origin]
+      target: { tabId }, world: "MAIN", func: readClaudeCodeHubQuotaInPage, args: stats ? [origin, stats] : [origin]
     })
     return results[0]?.result || { success: false, error: "页面未返回配额" }
   } catch (error) {

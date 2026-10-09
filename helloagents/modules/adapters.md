@@ -7,6 +7,7 @@
 - `SITE_REVENUE` 目前由 One API、New API、Veloera、One Hub、Done Hub 系列适配器声明支持。
 - 营收接口使用 Bearer 访问令牌和数值 `role >= 10` 的管理员身份；返回值为当天全站扣费 quota 聚合，不传 `username` 过滤条件。
 - 其它适配器保持不支持状态，界面不会提供营收开关。
+- 区间查询：`getSiteRevenue(range)` 与可选的 `getRangeUsageStats(range)`。One API 系列用 `/api/log/stat` 与 `/api/log/self/stat`（`type=2`）；Sub2API 非当天用 `/api/v1/admin/usage/stats` 与 `/api/v1/usage/stats`（`start_date`/`end_date`/`timezone`，`total_actual_cost`）；Right.Codes、Portunex 直接复用带 `timeRange` 的 `getUsageStats`；Ahmes 用 `/api/usage/daily?days=N`（N 为起始日到今天的天数）按 `date` 字段求和；Claude Code Hub 用 `GET /api/v1/usage-logs/stats`（`startTime`/`endTime` 毫秒时间戳，与站点日志页一致，取 `totalCost`），直接请求失败时回退到站点页面上下文。Cubence 暂不支持区间消耗。
 
 ## Right.codes 订阅字段
 - Right.codes 适配器在 `getAccountBalance()` 的返回 `extra` 中附带订阅相关字段（如 `expire_time` / `daily_limit`）。

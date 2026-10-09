@@ -50,9 +50,9 @@ async function main() {
     const errors = []
     page.on('pageerror', error => errors.push(error.message))
     await page.goto(`chrome-extension://${extensionId}/popup.html`)
-    await page.getByRole('tab', { name: '今日营收' }).waitFor()
+    await page.getByRole('tab', { name: '营收统计' }).waitFor()
     assert.equal(await page.getByRole('tab').count(), 4)
-    assert.equal(await page.getByRole('tab', { name: '今日营收' }).getAttribute('aria-selected'), 'true')
+    assert.equal(await page.getByRole('tab', { name: '营收统计' }).getAttribute('aria-selected'), 'true')
     for (const tab of await page.getByRole('tab').all()) {
       assert.equal((await tab.getAttribute('class')).includes('bg-white'), (await tab.getAttribute('aria-selected')) === 'true')
     }
@@ -83,7 +83,7 @@ async function main() {
         await chrome.storage.local.set({ site_accounts: JSON.stringify(stored) })
       }, rawQuota)
       await page.reload()
-      await page.getByRole('tab', { name: '今日营收', selected: true }).waitFor()
+      await page.getByRole('tab', { name: '营收统计', selected: true }).waitFor()
       assert.equal(await difference.innerText(), expected)
       assert.equal(await difference.evaluate(el => getComputedStyle(el).color), color)
     }
@@ -93,15 +93,15 @@ async function main() {
       await chrome.storage.local.set({ site_accounts: JSON.stringify(stored) })
     })
     await page.reload()
-    await page.getByRole('tab', { name: '今日营收', selected: true }).waitFor()
+    await page.getByRole('tab', { name: '营收统计', selected: true }).waitFor()
     await page.setViewportSize({ width: 384, height: 600 })
     await page.getByRole('tab', { name: '订阅信息' }).click()
     await page.getByRole('tabpanel').getByText('月度套餐', { exact: true }).waitFor()
     assert.match(await page.getByRole('tabpanel').innerText(), /月度套餐/)
-    await page.getByRole('tab', { name: '今日营收' }).click()
-    await page.getByRole('tab', { name: '今日营收', selected: true }).waitFor()
+    await page.getByRole('tab', { name: '营收统计' }).click()
+    await page.getByRole('tab', { name: '营收统计', selected: true }).waitFor()
     await page.reload()
-    await page.getByRole('tab', { name: '今日营收', selected: true }).waitFor()
+    await page.getByRole('tab', { name: '营收统计', selected: true }).waitFor()
 
     await page.getByRole('button', { name: '新增账号' }).click()
     const dialog = page.getByRole('dialog')

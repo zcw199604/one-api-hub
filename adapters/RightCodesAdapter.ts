@@ -224,6 +224,10 @@ export class RightCodesAdapter implements ISiteAdapter {
     }
   }
 
+  getRangeUsageStats(credentials: SiteCredentials, timeRange: TimeRange): Promise<UsageStats> {
+    return this.getUsageStats(credentials, timeRange)
+  }
+
   async getUsageStats(credentials: SiteCredentials, timeRange: TimeRange): Promise<UsageStats> {
     if (credentials.auth.kind !== "api-key" && credentials.auth.kind !== "cookie") {
       throw new Error("Right.Codes 适配器仅支持 api-key（Bearer token）或 cookie 鉴权")

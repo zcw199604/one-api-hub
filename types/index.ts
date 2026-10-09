@@ -80,6 +80,35 @@ export interface RevenueSnapshot {
   error?: string;
 }
 
+export type Money = { USD: number; CNY: number };
+export type RevenueRangePreset = 'today' | 'week' | 'month' | 'custom';
+export interface CustomDateRange { start: string; end: string } // YYYY-MM-DD
+
+export interface RevenueRow {
+  id: string;
+  name: string;
+  baseUrl: string;
+  amount?: Money;
+  balance?: Money; // 账号当前余额（仅个人账号消耗明细使用）
+  localSince?: string; // 金额含本地每日记录时，记录的起始日期
+  error?: string;
+  updatedAt?: number;
+}
+
+// 指定时间范围的营收/消耗查询结果（按站点逐项，失败项保留错误）
+export interface RevenueRangeReport {
+  revenue: RevenueRow[];
+  consumption: RevenueRow[];
+  fetchedAt: number;
+}
+
+// 营收面板展示数据：总营收、总消耗与站点明细
+export interface RevenueView {
+  revenue: { total: Money; successful: number; failed: number };
+  consumption: { total: Money; failed: number; rows: RevenueRow[] };
+  rows: RevenueRow[];
+}
+
 // 订阅信息（用于包月账号展示）
 export interface SubscriptionInfo {
   expireTime: number;        // 到期时间戳（秒）

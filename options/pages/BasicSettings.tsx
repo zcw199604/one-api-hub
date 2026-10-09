@@ -43,7 +43,7 @@ export default function BasicSettings() {
   const handleDefaultTabChange = async (tab: 'consumption' | 'balance' | 'revenue') => {
     const success = await updateActiveTab(tab)
     if (success) {
-      toast.success(`默认标签页已设置为 ${tab === 'consumption' ? '今日消耗' : tab === 'revenue' ? '今日营收' : '总余额'}`)
+      toast.success(`默认标签页已设置为 ${tab === 'consumption' ? '今日消耗' : tab === 'revenue' ? '营收统计' : '总余额'}`)
     } else {
       toast.error('设置保存失败')
     }
@@ -210,7 +210,7 @@ export default function BasicSettings() {
                 </button>
                 <button onClick={() => handleDefaultTabChange('revenue')}
                   className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${activeTab === 'revenue' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
-                  今日营收
+                  营收统计
                 </button>
               </div>
             </div>

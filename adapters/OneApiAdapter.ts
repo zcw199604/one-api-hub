@@ -13,6 +13,7 @@ import {
   fetchTodayUsage,
   checkAdminAccess,
   fetchSiteRevenue,
+  fetchSelfConsumption,
   getOrCreateAccessToken,
   updateApiToken,
   validateAccountConnection
@@ -91,6 +92,20 @@ export class OneApiAdapter implements ISiteAdapter {
       promptTokens: raw.today_prompt_tokens,
       completionTokens: raw.today_completion_tokens,
       requestCount: raw.today_requests_count
+    }
+  }
+
+  async getRangeUsageStats(credentials: SiteCredentials, timeRange: { start: number; end: number }): Promise<UsageStats> {
+    if (credentials.auth.kind !== "one-api-token") {
+      throw new Error("one-api 适配器需要 one-api-token 鉴权")
+    }
+    const { rawQuota } = await fetchSelfConsumption(
+      credentials.siteUrl, credentials.auth.userId, credentials.auth.accessToken, timeRange
+    )
+    return {
+      rawConsumption: rawQuota,
+      rawUnit: this.metadata.balance.rawUnit,
+      conversionFactor: this.metadata.balance.conversionFactor
     }
   }
 

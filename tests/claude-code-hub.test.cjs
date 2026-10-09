@@ -182,6 +182,41 @@ test('403 falls back to the authenticated quota page and reads user totals, not 
   } finally { global.location = previousLocation; global.DOMParser = previousParser }
 })
 
+test('range usage reads the usage-logs stats endpoint with millisecond bounds after identity check', async () => {
+  const calls = []
+  global.fetch = async (url, init) => {
+    const parsed = new URL(url)
+    calls.push(parsed.pathname)
+    if (parsed.pathname.endsWith('/getMyQuota')) return Response.json({ ok: true, data: quota })
+    assert.equal(parsed.pathname, '/api/v1/usage-logs/stats')
+    assert.equal(init.method, 'GET')
+    assert.equal(init.credentials, 'include')
+    assert.equal(parsed.searchParams.get('startTime'), String(new Date(2026, 8, 1).getTime()))
+    assert.equal(parsed.searchParams.get('endTime'), String(new Date(2026, 9, 1).getTime()))
+    assert.equal(parsed.searchParams.get('excludeStatusCode200'), 'false')
+    return Response.json({ totalCost: 12.5, totalRequests: 3, totalInputTokens: 10, totalOutputTokens: 20 })
+  }
+  const range = { start: Math.floor(new Date(2026, 8, 1).getTime() / 1000), end: Math.floor(new Date(2026, 8, 30, 23, 59, 59).getTime() / 1000) }
+  const usage = await adapter().getRangeUsageStats(credentials, range)
+  assert.deepEqual(calls, ['/api/actions/my-usage/getMyQuota', '/api/v1/usage-logs/stats'])
+  assert.equal(usage.rawConsumption, 12.5)
+  assert.equal(usage.requestCount, 3)
+})
+
+test('range usage falls back to the page context when the direct call is rejected', async () => {
+  global.fetch = async url => url.endsWith('getMyQuota')
+    ? Response.json({ ok: true, data: quota })
+    : new Response('', { status: 403 })
+  let forwarded
+  global.chrome = { runtime: { sendMessage: async request => {
+    forwarded = request.stats
+    return { success: true, data: { totalCost: 1 } }
+  } } }
+  const range = { start: Math.floor(new Date(2026, 8, 1).getTime() / 1000), end: Math.floor(new Date(2026, 8, 1, 23, 59, 59).getTime() / 1000) }
+  assert.equal((await adapter().getRangeUsageStats(credentials, range)).rawConsumption, 1)
+  assert.deepEqual(forwarded, { startTime: new Date(2026, 8, 1).getTime(), endTime: new Date(2026, 8, 2).getTime() })
+})
+
 test('background refresh reads existing site tab without messaging itself and rejects content scripts', async () => {
   const Module = require('node:module')
   const path = require('node:path')

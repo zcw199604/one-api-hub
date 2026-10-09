@@ -73,6 +73,10 @@ export class PortunexAdapter implements ISiteAdapter {
     }
   }
 
+  getRangeUsageStats(credentials: SiteCredentials, timeRange: TimeRange): Promise<UsageStats> {
+    return this.getUsageStats(credentials, timeRange)
+  }
+
   async getUsageStats(credentials: SiteCredentials, timeRange: TimeRange): Promise<UsageStats> {
     if (credentials.auth.kind !== "api-key") {
       throw new Error("Portunex 适配器需要 api-key（Bearer token）鉴权")

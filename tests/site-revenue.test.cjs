@@ -176,3 +176,155 @@ test('save, edit and both refresh paths persist independent revenue and reject u
     }
   } finally { Module._load = originalLoad }
 })
+
+test('revenue range presets resolve to inclusive local-day bounds and validate custom input', () => {
+  const { resolveRevenueRange } = require('../utils/siteRevenue.ts')
+  const now = new Date(2026, 9, 9, 15, 30)
+  const sec = (y, m, d, h = 0, mi = 0, s = 0) => Math.floor(new Date(y, m, d, h, mi, s).getTime() / 1000)
+  const custom = { start: '', end: '' }
+  assert.deepEqual(resolveRevenueRange('today', custom, now).range, { preset: 'today', start: sec(2026, 9, 9), end: sec(2026, 9, 9, 23, 59, 59), text: '2026-10-09' })
+  assert.deepEqual(resolveRevenueRange('week', custom, now).range, { preset: 'week', start: sec(2026, 9, 3), end: sec(2026, 9, 9, 23, 59, 59), text: '2026-10-03 ~ 2026-10-09' })
+  assert.equal(resolveRevenueRange('month', custom, now).range.start, sec(2026, 9, 1))
+  assert.equal(resolveRevenueRange('custom', { start: '2026-09-01', end: '2026-12-31' }, now).range.end, sec(2026, 9, 9, 23, 59, 59))
+  for (const [input, message] of [
+    [{ start: '', end: '2026-10-01' }, /选择/], [{ start: '2026-02-30', end: '2026-10-01' }, /选择/],
+    [{ start: '2026-10-05', end: '2026-10-01' }, /不能晚于结束/], [{ start: '2026-10-10', end: '2026-10-11' }, /不能晚于今天/],
+    [{ start: '2025-01-01', end: '2026-10-09' }, /366/]
+  ]) assert.match(resolveRevenueRange('custom', input, now).error, message)
+})
+
+test('range report totals consumption and difference, and failures are never counted as zero', () => {
+  const { buildRangeRevenueView } = require('../utils/siteRevenue.ts')
+  const row = (id, usd, cny, error) => ({ id, name: id, baseUrl: `https://${id}.test`, amount: usd === undefined ? undefined : { USD: usd, CNY: cny }, error })
+  const view = buildRangeRevenueView({ fetchedAt: 1,
+    revenue: [row('a', 10, 60), row('b', undefined, undefined, '403')],
+    consumption: [row('c', 2, 14.4), row('d', 1, 7.2), row('e', undefined, undefined, '不支持')] })
+  assert.deepEqual(view.revenue, { total: { USD: 10, CNY: 60 }, successful: 1, failed: 1 })
+  assert.deepEqual(view.consumption.failed, 1)
+  assert.ok(Math.abs(view.consumption.total.CNY - 21.6) < 1e-9)
+  assert.equal(view.rows.length, 2)
+  const detailed = buildRangeRevenueView({ fetchedAt: 1, revenue: [], consumption: [row('c', 2, 14.4), row('e', undefined, undefined, '不支持')] },
+    [{ id: 'c', balance: { USD: 10, CNY: 72 } }])
+  assert.deepEqual(detailed.consumption.rows.map(r => [r.id, r.balance?.USD, r.error]), [['c', 10, undefined], ['e', undefined, '不支持']])
+})
+
+test('range queries use range stat endpoints for One API and Sub2API; unsupported sites report errors', async () => {
+  const { fetchRevenueRangeReport } = require('../services/siteRevenue.ts')
+  const seen = []
+  global.fetch = async (url, init) => {
+    const parsed = new URL(url)
+    seen.push(parsed.pathname + '?' + [...parsed.searchParams.keys()].filter(k => k !== 'timezone').sort().join(','))
+    if (parsed.pathname === '/api/user/self') return Response.json({ success: true, data: { role: 10 } })
+    if (parsed.pathname === '/api/log/stat') return Response.json({ success: true, data: { quota: 1000000 } })
+    if (parsed.pathname === '/api/log/self/stat') return Response.json({ success: true, data: { quota: 500000 } })
+    throw new Error(`Unexpected ${url}`)
+  }
+  const account = (id, extra) => ({ id, site_name: id, site_url: `https://${id}.test`, site_type: 'new-api', exchange_rate: 7, updated_at: 1,
+    account_info: {}, ...extra })
+  const accounts = [
+    account('rev', { revenue_enabled: true, revenue_exchange_rate: 6 }),
+    account('rev', { revenue_enabled: true, revenue_exchange_rate: 6, id: 'rev2' }),
+    account('mine'), account('cube', { site_type: 'cubence' })
+  ]
+  const report = await fetchRevenueRangeReport(accounts, range, a => ({ siteUrl: a.site_url, auth: { kind: 'one-api-token', userId: 1, accessToken: 't' } }))
+  assert.equal(report.revenue.length, 1) // 同 origin 去重
+  assert.deepEqual(report.revenue[0].amount, { USD: 2, CNY: 12 })
+  assert.deepEqual(report.consumption.find(r => r.id === 'mine').amount, { USD: 1, CNY: 7 })
+  assert.match(report.consumption.find(r => r.id === 'cube').error, /暂不支持/)
+  assert.ok(seen.includes('/api/log/stat?end_timestamp,start_timestamp,type'))
+  assert.ok(seen.includes('/api/log/self/stat?end_timestamp,start_timestamp,type'))
+
+  const sub2api = new (require('../adapters/Sub2ApiAdapter.ts').Sub2ApiAdapter)()
+  const sub = { siteUrl: 'https://s.test', auth: { kind: 'api-key', apiKey: 'jwt' } }
+  const calls = []
+  global.fetch = async (url, init) => {
+    const parsed = new URL(url)
+    calls.push(parsed.pathname + '?' + parsed.searchParams.get('start_date') + '/' + parsed.searchParams.get('end_date'))
+    const data = parsed.pathname === '/api/v1/user/profile' ? { role: 'admin' } : { total_actual_cost: 3.5 }
+    return Response.json({ code: 0, data })
+  }
+  const wide = { start: Math.floor(new Date(2026, 8, 1).getTime() / 1000), end: Math.floor(new Date(2026, 8, 30, 23, 59, 59).getTime() / 1000) }
+  assert.equal((await sub2api.getSiteRevenue(sub, wide)).rawQuota, 3.5)
+  assert.equal((await sub2api.getRangeUsageStats(sub, wide)).rawConsumption, 3.5)
+  assert.ok(calls.includes('/api/v1/admin/usage/stats?2026-09-01/2026-09-30'))
+  assert.ok(calls.includes('/api/v1/usage/stats?2026-09-01/2026-09-30'))
+})
+
+test('today view lists personal accounts with consumption and balance but not revenue sites', () => {
+  const { buildTodayRevenueView } = require('../utils/siteRevenue.ts')
+  const site = (id, revenueEnabled) => ({ id, name: id, baseUrl: `https://${id}.test`, revenueEnabled,
+    balance: { USD: 10, CNY: 72 }, todayConsumption: { USD: 1, CNY: 7.2 } })
+  const view = buildTodayRevenueView([site('mine', false), site('owned', true)], { USD: 1, CNY: 7.2 })
+  assert.deepEqual(view.consumption.rows.map(r => [r.id, r.amount.USD, r.balance.CNY]), [['mine', 1, 72]])
+})
+
+test('daily ledger keeps the max per day, skips stale or missing values and serializes concurrent writes', async () => {
+  const Module = require('node:module')
+  const originalLoad = Module._load
+  const db = new Map()
+  Module._load = function(name, ...args) {
+    if (name === '@plasmohq/storage') return { Storage: class {
+      async get(k) { await new Promise(r => setTimeout(r, 1)); return db.get(k) }
+      async set(k, v) { db.set(k, JSON.parse(JSON.stringify(v))) }
+    } }
+    return originalLoad.call(this, name, ...args)
+  }
+  delete require.cache[require.resolve('../services/dailyLedger.ts')]
+  try {
+    const { recordRefreshToLedger, readLedger, removeAccountFromLedger } = require('../services/dailyLedger.ts')
+    const mine = { id: 'mine', site_url: 'https://mine.test' }
+    const owned = { id: 'owned', site_url: 'https://owned.test/', revenue_enabled: true }
+    await Promise.all([
+      recordRefreshToLedger({ account: mine, factor: 500000, date: '2026-10-09', consumptionRaw: 1000000 }),
+      recordRefreshToLedger({ account: { ...mine, id: 'other' }, factor: 1, date: '2026-10-09', consumptionRaw: 3 }),
+      recordRefreshToLedger({ account: owned, factor: 500000, date: '2026-10-09', revenue: { date: '2026-10-09', rawQuota: 2500000, updatedAt: 1 } })
+    ])
+    await recordRefreshToLedger({ account: mine, factor: 500000, date: '2026-10-09', consumptionRaw: 500000 }) // lower value ignored
+    await recordRefreshToLedger({ account: mine, factor: 500000, date: '2026-10-09', consumptionRaw: null }) // no usage this refresh
+    await recordRefreshToLedger({ account: owned, factor: 500000, date: '2026-10-09', revenue: { date: '2026-10-08', rawQuota: 9, updatedAt: 1 } })
+    await recordRefreshToLedger({ account: owned, factor: 500000, date: '2026-10-09', revenue: { date: '2026-10-09', error: 'x', updatedAt: 1 } })
+    let ledger = await readLedger()
+    assert.deepEqual(ledger.personal.mine, { '2026-10-09': 2 })
+    assert.deepEqual(ledger.personal.other, { '2026-10-09': 3 })
+    assert.deepEqual(ledger.revenue['https://owned.test'], { '2026-10-09': 5 })
+    await removeAccountFromLedger('other')
+    assert.equal((await readLedger()).personal.other, undefined)
+  } finally {
+    Module._load = originalLoad
+    delete require.cache[require.resolve('../services/dailyLedger.ts')]
+  }
+})
+
+test('range report fills gaps from the local ledger without double counting or hiding failures', async () => {
+  const { fetchRevenueRangeReport } = require('../services/siteRevenue.ts')
+  global.fetch = async url => {
+    const parsed = new URL(url)
+    if (parsed.pathname === '/api/user/self') return Response.json({ success: true, data: { role: 10 } })
+    if (parsed.pathname === '/api/log/stat') return Response.json({ success: true, data: { quota: 500000 } }) // $1，被清理后偏小
+    if (parsed.pathname === '/api/log/self/stat') {
+      return parsed.host === 'big.test' ? Response.json({ success: true, data: { quota: 5000000 } }) : Response.json({ success: true, data: { quota: 500000 } })
+    }
+    throw new Error(`Unexpected ${url}`)
+  }
+  const account = (id, extra) => ({ id, site_name: id, site_url: `https://${id}.test`, site_type: 'new-api', exchange_rate: 7, updated_at: 1, account_info: {}, ...extra })
+  const accounts = [
+    account('rev', { revenue_enabled: true, revenue_exchange_rate: 6 }),
+    account('small'), account('big'), account('cube', { site_type: 'cubence' }), account('none', { site_type: 'cubence' })
+  ]
+  const day = d => `2026-10-0${d}`
+  const inRange = { start: Math.floor(new Date(2026, 9, 1).getTime() / 1000), end: Math.floor(new Date(2026, 9, 5, 23, 59, 59).getTime() / 1000) }
+  const ledger = {
+    revenue: { 'https://rev.test': { [day(1)]: 3, [day(2)]: 2, '2026-09-30': 100 } },
+    personal: { small: { [day(2)]: 4, [day(3)]: 1 }, big: { [day(2)]: 1 }, cube: { [day(4)]: 2.5 } }
+  }
+  const report = await fetchRevenueRangeReport(accounts, inRange, a => ({ siteUrl: a.site_url, auth: { kind: 'one-api-token', userId: 1, accessToken: 't' } }), ledger)
+  assert.deepEqual(report.revenue[0].amount, { USD: 5, CNY: 30 }) // 本地 5 > 站点 1
+  assert.equal(report.revenue[0].localSince, '2026-09-30')
+  const byId = id => report.consumption.find(r => r.id === id)
+  assert.deepEqual(byId('small').amount, { USD: 5, CNY: 35 })
+  assert.ok(byId('small').localSince)
+  assert.deepEqual(byId('big').amount, { USD: 10, CNY: 70 }) // 站点更大，不叠加
+  assert.equal(byId('big').localSince, undefined)
+  assert.deepEqual(byId('cube').amount, { USD: 2.5, CNY: 17.5 }) // 站点不支持范围，仅本地
+  assert.match(byId('none').error, /暂不支持/)
+})

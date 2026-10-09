@@ -5,7 +5,8 @@ import { accountStorage } from "./accountStorage"
 import { analyzeAutoDetectError, type AutoDetectError } from "../utils/autoDetectUtils"
 import { determineHealthStatus } from "./apiService"
 import { fetchAccountSnapshot } from "./fetchAccountSnapshot"
-import { fetchRevenueSnapshot } from "./siteRevenue"
+import { fetchRevenueSnapshot, getQuotaFactor } from "./siteRevenue"
+import { recordRefreshToLedger } from "./dailyLedger"
 import { getRevenueDate } from "../utils/siteRevenue"
 import type { ISiteAdapter } from "../adapters/ISiteAdapter"
 
@@ -404,6 +405,12 @@ export class AccountManager {
         account_info: nextInfo
       })
 
+      if (updated) {
+        await recordRefreshToLedger({
+          account, factor: getQuotaFactor(adapter), date: getRevenueDate(new Date(timeRange.start * 1000)),
+          consumptionRaw: usage ? usage.rawConsumption : null, revenue
+        })
+      }
       return updated && !revenue?.error
     } catch (error) {
       console.error("刷新账号数据失败:", error)
