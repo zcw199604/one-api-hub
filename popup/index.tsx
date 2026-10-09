@@ -13,7 +13,8 @@ import AccountList from "../components/AccountList"
 import AddAccountDialog from "../components/AddAccountDialog"
 import EditAccountDialog from "../components/EditAccountDialog"
 import { accountStorage } from "../services/accountStorage"
-import type { BalanceTab, DisplaySiteData, SubscriptionInfo } from "../types"
+import type { DisplaySiteData, SubscriptionInfo } from "../types"
+import { calculateRevenueSummary, getRevenueSites, getBalanceTabs } from "../utils/siteRevenue"
 
 function IndexPopup() {
   // 用户偏好设置管理
@@ -86,11 +87,14 @@ function IndexPopup() {
 
     return subscriptions[0]
   }, [displayData])
+  const revenueSites = useMemo(() => getRevenueSites(displayData), [displayData])
+  const revenueSummary = useMemo(() => calculateRevenueSummary(displayData), [displayData])
+  const balanceTabs = useMemo(() => getBalanceTabs(revenueSites.length > 0, Boolean(subscription)), [revenueSites.length, subscription])
   useEffect(() => {
-    if (!subscription && activeTab === 'subscription') {
+    if (!isInitialLoad && !preferencesLoading && !balanceTabs.includes(activeTab)) {
       void updateActiveTab('balance')
     }
-  }, [activeTab, subscription, updateActiveTab])
+  }, [activeTab, balanceTabs, isInitialLoad, preferencesLoading, updateActiveTab])
 
   // 事件处理 - 使用 useCallback 优化
   const handleCurrencyToggle = useCallback(async () => {
@@ -99,11 +103,8 @@ function IndexPopup() {
   }, [currencyType, updateCurrencyType])
 
   const handleTabChange = useCallback(async (index: number) => {
-    const newTab: BalanceTab = index === 0 ? 'consumption' : index === 1 ? 'balance' : 'subscription'
-    const resolvedTab: BalanceTab = subscription ? newTab : newTab === 'subscription' ? 'balance' : newTab
-    await updateActiveTab(resolvedTab)
-    console.log(`切换到${resolvedTab === 'consumption' ? '今日消耗' : resolvedTab === 'balance' ? '总余额' : '订阅信息'}标签页`)
-  }, [subscription, updateActiveTab])
+    await updateActiveTab(balanceTabs[index] ?? 'balance')
+  }, [balanceTabs, updateActiveTab])
 
   const handleOpenTab = useCallback(() => {
     chrome.tabs.create({ url: chrome.runtime.getURL('options.html') })
@@ -167,11 +168,11 @@ function IndexPopup() {
     const refreshPromise = async () => {
       console.log('开始刷新账号:', account.name)
       const success = await accountStorage.refreshAccount(account.id)
+      await loadAccountData()
       
       if (success) {
         console.log('账号刷新成功:', account.name)
         // 刷新成功后重新加载数据，这将触发动画
-        await loadAccountData()
         return success
       } else {
         console.warn('账号刷新失败:', account.name)
@@ -288,6 +289,8 @@ function IndexPopup() {
             totalConsumption={totalConsumption}
             consumptionBreakdown={consumptionBreakdown}
             totalBalance={totalBalance}
+            revenueSites={revenueSites}
+            revenueSummary={revenueSummary}
             todayTokens={todayTokens}
             currencyType={currencyType}
             activeTab={activeTab}

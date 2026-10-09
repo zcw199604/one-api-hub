@@ -5,6 +5,9 @@ import { accountStorage } from "./accountStorage"
 import { analyzeAutoDetectError, type AutoDetectError } from "../utils/autoDetectUtils"
 import { determineHealthStatus } from "./apiService"
 import { fetchAccountSnapshot } from "./fetchAccountSnapshot"
+import { fetchRevenueSnapshot } from "./siteRevenue"
+import { getRevenueDate } from "../utils/siteRevenue"
+import type { ISiteAdapter } from "../adapters/ISiteAdapter"
 
 type RightCodesBalanceExtra = {
   expire_time?: number
@@ -43,6 +46,8 @@ export interface ValidateAndSaveParams {
   userId?: string
   apiKey?: string
   exchangeRate: string
+  revenueEnabled?: boolean
+  revenueExchangeRate?: string
 }
 
 export class AccountManager {
@@ -55,6 +60,20 @@ export class AccountManager {
       AccountManager.instance = new AccountManager()
     }
     return AccountManager.instance
+  }
+
+  private async buildRevenueConfiguration(
+    params: ValidateAndSaveParams, adapter: ISiteAdapter, credentials: SiteCredentials, range: TimeRange
+  ) {
+    if (!params.revenueEnabled) return { revenue_enabled: false, revenue: null }
+    if (!adapter.metadata.capabilities.includes(AdapterCapability.SITE_REVENUE)) {
+      throw new Error("当前站点不支持营收统计")
+    }
+    const rate = Number(params.revenueExchangeRate)
+    if (!Number.isFinite(rate) || rate <= 0 || rate > 100) throw new Error("请输入有效的营收折算比例 (0.01 - 100)")
+    const revenue = await fetchRevenueSnapshot(adapter, credentials, range)
+    if (revenue.error) throw new Error(revenue.error)
+    return { revenue_enabled: true, revenue_exchange_rate: rate, revenue }
   }
 
   async autoDetectAccount(siteUrl: string, siteType?: string): Promise<AccountValidationResult> {
@@ -174,6 +193,7 @@ export class AccountManager {
       ])
 
       const accountData: Omit<SiteAccount, "id" | "created_at" | "updated_at"> = {
+        ...await this.buildRevenueConfiguration(params, adapter, credentials, timeRange),
         emoji: "", // 不再使用 emoji
         site_name: siteName,
         site_url: siteUrl,
@@ -288,6 +308,7 @@ export class AccountManager {
       ])
 
       const updateData: Partial<Omit<SiteAccount, "id" | "created_at">> = {
+        ...await this.buildRevenueConfiguration(params, adapter, credentials, timeRange),
         site_name: siteName,
         site_url: siteUrl,
         exchange_rate: exchangeRate,
@@ -375,18 +396,24 @@ export class AccountManager {
         nextInfo.today_requests_count = usage.requestCount ?? 0
       }
 
-      await accountStorage.updateAccount(accountId, {
+      const revenue = account.revenue_enabled ? await fetchRevenueSnapshot(adapter, credentials, timeRange) : null
+      const updated = await accountStorage.updateAccount(accountId, {
+        revenue,
         health_status: "healthy",
         last_sync_time: Date.now(),
         account_info: nextInfo
       })
 
-      return true
+      return updated && !revenue?.error
     } catch (error) {
       console.error("刷新账号数据失败:", error)
       const health = determineHealthStatus(error)
       try {
+        const latest = await accountStorage.getAccountById(accountId)
         await accountStorage.updateAccount(accountId, {
+          ...(latest?.revenue_enabled ? { revenue: {
+            date: getRevenueDate(), updatedAt: Date.now(), error: "账号刷新失败，请检查连接或登录权限"
+          } } : {}),
           health_status: health.status,
           last_sync_time: Date.now()
         })

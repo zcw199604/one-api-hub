@@ -4,6 +4,7 @@ import { Dialog, DialogPanel, DialogTitle, Transition, TransitionChild } from "@
 import { GlobeAltIcon, XMarkIcon, SparklesIcon, UserIcon, KeyIcon, EyeIcon, EyeSlashIcon, CurrencyDollarIcon } from "@heroicons/react/24/outline"
 import { autoDetectAccount, validateAndSaveAccount, extractDomainPrefix, isValidExchangeRate } from "../services/accountOperations"
 import AutoDetectErrorAlert from "./AutoDetectErrorAlert"
+import RevenueSettings from "./RevenueSettings"
 import type { AutoDetectError } from "../utils/autoDetectUtils"
 import { SiteAdapterRegistry } from "../adapters/SiteAdapterRegistry"
 import { AdapterCapability } from "../adapters/types"
@@ -30,6 +31,8 @@ export default function AddAccountDialog({ isOpen, onClose }: AddAccountDialogPr
   const [detectionError, setDetectionError] = useState<AutoDetectError | null>(null)
   const [showManualForm, setShowManualForm] = useState(false)
   const [exchangeRate, setExchangeRate] = useState("")
+  const [revenueEnabled, setRevenueEnabled] = useState(false)
+  const [revenueExchangeRate, setRevenueExchangeRate] = useState("7.2")
   const [currentTabUrl, setCurrentTabUrl] = useState<string | null>(null)
 
   const effectiveSiteType = (() => {
@@ -66,6 +69,8 @@ export default function AddAccountDialog({ isOpen, onClose }: AddAccountDialogPr
       setDetectionError(null)
       setShowManualForm(false)
       setExchangeRate("")
+      setRevenueEnabled(false)
+      setRevenueExchangeRate("7.2")
       setCurrentTabUrl(null)
       setUrl("")
       setSiteType("auto")
@@ -173,7 +178,9 @@ export default function AddAccountDialog({ isOpen, onClose }: AddAccountDialogPr
           accessToken.trim(),
           userId.trim(),
           exchangeRate,
-          siteType
+          siteType,
+          revenueEnabled,
+          revenueExchangeRate
         ),
         {
           loading: '正在添加账号...',
@@ -598,7 +605,11 @@ export default function AddAccountDialog({ isOpen, onClose }: AddAccountDialogPr
                         </div>
                       )}
 
-                      {/* 充值金额比例 */}
+                    <RevenueSettings siteType={effectiveSiteType} url={url} userId={userId} accessToken={accessToken}
+                      enabled={revenueEnabled} rate={revenueExchangeRate}
+                      onEnabledChange={setRevenueEnabled} onRateChange={setRevenueExchangeRate} />
+
+                    {/* 充值金额比例 */}
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-2">
                           充值金额比例 (CNY/USD)

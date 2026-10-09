@@ -5,6 +5,7 @@ import { GlobeAltIcon, XMarkIcon, PencilIcon, UserIcon, KeyIcon, EyeIcon, EyeSla
 import { accountStorage } from "../services/accountStorage"
 import { autoDetectAccount, validateAndUpdateAccount, extractDomainPrefix, isValidExchangeRate } from "../services/accountOperations"
 import AutoDetectErrorAlert from "./AutoDetectErrorAlert"
+import RevenueSettings from "./RevenueSettings"
 import type { AutoDetectError } from "../utils/autoDetectUtils"
 import type { DisplaySiteData } from "../types"
 import { SiteAdapterRegistry } from "../adapters/SiteAdapterRegistry"
@@ -33,6 +34,8 @@ export default function EditAccountDialog({ isOpen, onClose, account }: EditAcco
   const [detectionError, setDetectionError] = useState<AutoDetectError | null>(null)
   const [showManualForm, setShowManualForm] = useState(true) // 编辑模式默认显示表单
   const [exchangeRate, setExchangeRate] = useState("")
+  const [revenueEnabled, setRevenueEnabled] = useState(false)
+  const [revenueExchangeRate, setRevenueExchangeRate] = useState("7.2")
 
   const effectiveSiteType = (() => {
     if (siteType !== "auto") return siteType
@@ -68,6 +71,8 @@ export default function EditAccountDialog({ isOpen, onClose, account }: EditAcco
     setDetectionError(null)
     setShowManualForm(true)
     setExchangeRate("")
+    setRevenueEnabled(false)
+    setRevenueExchangeRate("7.2")
   }
 
   // 加载账号数据到表单
@@ -87,6 +92,8 @@ export default function EditAccountDialog({ isOpen, onClose, account }: EditAcco
         )
         setUserId((siteAccount.account_info.id ?? "").toString())
         setExchangeRate(siteAccount.exchange_rate.toString())
+        setRevenueEnabled(siteAccount.revenue_enabled ?? false)
+        setRevenueExchangeRate(String(siteAccount.revenue_exchange_rate ?? 7.2))
       }
     } catch (error) {
       console.error('加载账号数据失败:', error)
@@ -176,7 +183,9 @@ export default function EditAccountDialog({ isOpen, onClose, account }: EditAcco
           accessToken.trim(),
           userId.trim(),
           exchangeRate,
-          siteType
+          siteType,
+          revenueEnabled,
+          revenueExchangeRate
         ),
         {
           loading: '正在保存更改...',
@@ -567,6 +576,10 @@ export default function EditAccountDialog({ isOpen, onClose, account }: EditAcco
                         </p>
                       </div>
                     )}
+
+                    <RevenueSettings siteType={effectiveSiteType} url={url} userId={userId} accessToken={accessToken}
+                      enabled={revenueEnabled} rate={revenueExchangeRate}
+                      onEnabledChange={setRevenueEnabled} onRateChange={setRevenueExchangeRate} />
 
                     {/* 充值金额比例 */}
                     <div>

@@ -443,6 +443,38 @@ export const fetchAccountQuota = async (
   return userData.quota || 0
 }
 
+export const checkAdminAccess = async (
+  baseUrl: string, userId: number, accessToken: string
+): Promise<number> => {
+  const data = await apiRequest<{ role?: number }>(
+    `${baseUrl.replace(/\/+$/, "")}/api/user/self`,
+    createTokenAuthRequest(userId, accessToken), "/api/user/self"
+  )
+  if (typeof data?.role !== "number" || !Number.isFinite(data.role) || data.role < 10) {
+    throw new Error("统计站点营收需要管理员权限")
+  }
+  return data.role
+}
+
+export const fetchSiteRevenue = async (
+  baseUrl: string, userId: number, accessToken: string,
+  timeRange: { start: number; end: number }
+): Promise<{ rawQuota: number }> => {
+  const params = new URLSearchParams({
+    type: "2",
+    start_timestamp: String(timeRange.start),
+    end_timestamp: String(timeRange.end)
+  })
+  const data = await apiRequest<{ quota?: number }>(
+    `${baseUrl.replace(/\/+$/, "")}/api/log/stat?${params}`,
+    createTokenAuthRequest(userId, accessToken), "/api/log/stat"
+  )
+  if (typeof data?.quota !== "number" || !Number.isFinite(data.quota) || data.quota < 0) {
+    throw new Error("站点营收数据格式异常")
+  }
+  return { rawQuota: data.quota }
+}
+
 /**
  * 获取今日使用情况
  */

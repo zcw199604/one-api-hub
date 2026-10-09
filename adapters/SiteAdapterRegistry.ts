@@ -133,6 +133,10 @@ export class SiteAdapterRegistry {
       )
     }
 
+    if (has(AdapterCapability.SITE_REVENUE) && (!adapter.checkRevenueAccess || !adapter.getSiteRevenue)) {
+      throw new AdapterRegistrationError(`adapter '${adapter.metadata.id}' 未实现营收权限检测或统计`)
+    }
+
     if (has(AdapterCapability.TOKEN_MANAGEMENT)) {
       const missing: string[] = []
       if (!adapter.getApiTokens) missing.push("getApiTokens")

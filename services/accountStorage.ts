@@ -12,6 +12,8 @@ import type {
 import { SiteAdapterRegistry } from "../adapters/SiteAdapterRegistry"
 import type { SiteCredentials, TimeRange } from "../adapters/types"
 import { fetchAccountSnapshot } from "./fetchAccountSnapshot"
+import { fetchRevenueSnapshot } from "./siteRevenue"
+import { getDisplayRevenue, getRevenueDate } from "../utils/siteRevenue"
 
 type RightCodesBalanceExtra = {
   expire_time?: number
@@ -268,6 +270,7 @@ class AccountStorageService {
       }
 
       updateData.account_info = nextInfo
+      updateData.revenue = account.revenue_enabled ? await fetchRevenueSnapshot(adapter, credentials, timeRange) : null
 
       // 更新账号信息
       const updateSuccess = await this.updateAccount(id, updateData);
@@ -277,14 +280,18 @@ class AccountStorageService {
         console.log(`账号 ${account.site_name} 健康状态变化: ${account.health_status} -> ${updateData.health_status}`);
       }
 
-      return updateSuccess;
+      return updateSuccess && !updateData.revenue?.error;
     } catch (error) {
       console.error('刷新账号数据失败:', error);
       const health = determineHealthStatus(error)
 
       // 在出现异常时也尝试更新健康状态
       try {
+        const latest = await this.getAccountById(id)
         await this.updateAccount(id, {
+          ...(latest?.revenue_enabled ? { revenue: {
+            date: getRevenueDate(), updatedAt: Date.now(), error: "账号刷新失败，请检查连接或登录权限"
+          } } : {}),
           health_status: health.status,
           last_sync_time: Date.now()
         });
@@ -328,7 +335,7 @@ class AccountStorageService {
     try {
       const accounts = await this.getAllAccounts();
       
-      return accounts.reduce((stats, account) => ({
+      return accounts.filter(account => !account.revenue_enabled).reduce((stats, account) => ({
         total_quota: stats.total_quota + account.account_info.quota,
         today_total_consumption: stats.today_total_consumption + account.account_info.today_quota_consumption,
         today_total_requests: stats.today_total_requests + account.account_info.today_requests_count,
@@ -392,6 +399,7 @@ class AccountStorageService {
       }
 
       return {
+        ...getDisplayRevenue(account, factor),
         id: account.id,
         icon: account.emoji,
         name: account.site_name,

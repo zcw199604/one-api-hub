@@ -33,6 +33,9 @@ export interface SiteAccount {
   adapter_config?: Record<string, any>; // 适配器配置（可选）
   health_status: SiteHealthStatus; // 站点健康状态
   exchange_rate: number; // 人民币与美元充值比例 (CNY per USD)
+  revenue_enabled?: boolean;
+  revenue_exchange_rate?: number; // 营收折算比例 (CNY per USD)
+  revenue?: RevenueSnapshot | null;
   account_info: AccountInfo; // 账号信息
   last_sync_time: number; // 最后同步时间 (timestamp)
   updated_at: number; // 更改时间 (timestamp)
@@ -68,7 +71,14 @@ export type SortOrder = 'asc' | 'desc';
 // 货币类型
 export type CurrencyType = 'USD' | 'CNY';
 // BalanceSection 标签页
-export type BalanceTab = 'consumption' | 'balance' | 'subscription';
+export type BalanceTab = 'consumption' | 'balance' | 'revenue' | 'subscription';
+
+export interface RevenueSnapshot {
+  rawQuota?: number;
+  date: string;
+  updatedAt: number;
+  error?: string;
+}
 
 // 订阅信息（用于包月账号展示）
 export interface SubscriptionInfo {
@@ -97,4 +107,8 @@ export interface DisplaySiteData {
   userId: number; // 真实的用户 ID，用于 API 调用
   // 订阅信息（用于包月账号展示）
   subscription?: SubscriptionInfo;
+  revenueEnabled?: boolean;
+  todayRevenue?: { USD: number; CNY: number };
+  revenueError?: string;
+  revenueUpdatedAt?: number;
 }

@@ -38,7 +38,9 @@ export async function validateAndSaveAccount(
   accessToken: string,
   userId: string,
   exchangeRate: string,
-  siteType: string = "one-api"
+  siteType: string = "one-api",
+  revenueEnabled: boolean = false,
+  revenueExchangeRate?: string
 ): Promise<AccountSaveResult> {
   return validateAndSaveAccountV2({
     siteType,
@@ -47,7 +49,9 @@ export async function validateAndSaveAccount(
     username,
     accessToken,
     userId,
-    exchangeRate
+    exchangeRate,
+    revenueEnabled,
+    revenueExchangeRate
   })
 }
 
@@ -60,7 +64,9 @@ export async function validateAndUpdateAccount(
   accessToken: string,
   userId: string,
   exchangeRate: string,
-  siteType: string = "one-api"
+  siteType: string = "one-api",
+  revenueEnabled: boolean = false,
+  revenueExchangeRate?: string
 ): Promise<AccountSaveResult> {
   return validateAndUpdateAccountV2(accountId, {
     siteType,
@@ -69,7 +75,9 @@ export async function validateAndUpdateAccount(
     username,
     accessToken,
     userId,
-    exchangeRate
+    exchangeRate,
+    revenueEnabled,
+    revenueExchangeRate
   })
 }
 

@@ -13,6 +13,30 @@ afterEach(() => { global.fetch = originalFetch })
 const credentials = { siteUrl: 'https://example.test/', auth: { kind: 'api-key', apiKey: 'session' } }
 const expected = { rawConsumption: 1.25, rawUnit: 'USD', conversionFactor: 1, promptTokens: 100, completionTokens: 50, requestCount: 3 }
 
+test('admin revenue uses Sub2API actual cost and admin UI request header', async () => {
+  const calls = []
+  global.fetch = async (url, init) => {
+    const path = new URL(url).pathname
+    calls.push(path)
+    assert.equal(init.headers.Authorization, 'Bearer session')
+    if (path === '/api/v1/user/profile') return Response.json({ code: 0, data: { role: 'admin' } })
+    assert.equal(path, '/api/v1/admin/dashboard/stats')
+    assert.equal(init.headers['X-Admin-UI-Request'], 'true')
+    return Response.json({ code: 0, data: { today_actual_cost: 18.5, today_account_cost: 20, today_cost: 42 } })
+  }
+  const adapter = new Sub2ApiAdapter()
+  assert.equal(await adapter.checkRevenueAccess(credentials), 10)
+  assert.deepEqual(await adapter.getSiteRevenue(credentials, { start: 1, end: 2 }), { rawQuota: 18.5 })
+  assert.deepEqual(calls, ['/api/v1/user/profile', '/api/v1/user/profile', '/api/v1/admin/dashboard/stats'])
+})
+
+test('non-admin Sub2API users cannot enable revenue', async () => {
+  global.fetch = async url => new URL(url).pathname === '/api/v1/user/profile'
+    ? Response.json({ code: 0, data: { role: 'user' } })
+    : Response.json({ code: 0, data: { today_actual_cost: 1 } })
+  await assert.rejects(new Sub2ApiAdapter().getSiteRevenue(credentials, { start: 1, end: 2 }), /管理员权限/)
+})
+
 test('standard dashboard usage preserves existing values without fallback', async () => {
   global.fetch = async url => {
     assert.equal(new URL(url).pathname, '/api/v1/usage/dashboard/stats')

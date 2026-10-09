@@ -19,6 +19,7 @@ interface Sub2ApiUserProfile {
   username?: string
   balance?: number
   status?: string
+  role?: string
 }
 
 interface Sub2ApiDashboardStats {
@@ -33,6 +34,10 @@ interface Sub2ApiUsageStats {
   total_input_tokens?: number
   total_output_tokens?: number
   total_requests?: number
+}
+
+interface Sub2ApiAdminDashboardStats {
+  today_actual_cost?: number
 }
 
 interface Sub2ApiPublicSettings {
@@ -57,6 +62,7 @@ export class Sub2ApiAdapter implements ISiteAdapter {
       AdapterCapability.AUTO_DETECT,
       AdapterCapability.BALANCE,
       AdapterCapability.USAGE_STATS,
+      AdapterCapability.SITE_REVENUE,
       AdapterCapability.TOKEN_MANAGEMENT
     ],
     balance: {
@@ -161,6 +167,37 @@ export class Sub2ApiAdapter implements ISiteAdapter {
       completionTokens: finiteNumberOrZero(stats.today_output_tokens),
       requestCount: finiteNumberOrZero(stats.today_requests)
     }
+  }
+
+  async checkRevenueAccess(credentials: SiteCredentials): Promise<number> {
+    if (credentials.auth.kind !== "api-key") {
+      throw new Error("Sub2API 营收统计需要用户面板 JWT（Bearer Token）鉴权")
+    }
+
+    const profile = await this.fetchProfile(credentials.siteUrl, credentials.auth.apiKey)
+    if (profile.role !== "admin") {
+      throw new Error("统计站点营收需要 Sub2API 管理员权限")
+    }
+    return 10
+  }
+
+  async getSiteRevenue(credentials: SiteCredentials, _timeRange: { start: number; end: number }) {
+    await this.checkRevenueAccess(credentials)
+    if (credentials.auth.kind !== "api-key") {
+      throw new Error("Sub2API 营收统计需要用户面板 JWT（Bearer Token）鉴权")
+    }
+
+    const stats = await this.fetchAuthenticated<Sub2ApiAdminDashboardStats>(
+      credentials.siteUrl,
+      "/api/v1/admin/dashboard/stats",
+      credentials.auth.apiKey,
+      { method: "GET", adminRequest: true }
+    )
+    const rawQuota = stats.today_actual_cost
+    if (typeof rawQuota !== "number" || !Number.isFinite(rawQuota) || rawQuota < 0) {
+      throw new Error("Sub2API 站点营收数据格式异常")
+    }
+    return { rawQuota }
   }
 
   async autoDetectAccount(siteUrl: string): Promise<AutoDetectResult> {
@@ -318,7 +355,7 @@ export class Sub2ApiAdapter implements ISiteAdapter {
     siteUrl: string,
     path: string,
     token: string,
-    options: { method: string; body?: unknown } = { method: "GET" }
+    options: { method: string; body?: unknown; adminRequest?: boolean } = { method: "GET" }
   ): Promise<T> {
     const baseUrl = normalizeSiteUrl(siteUrl)
     const fetchUrl = new URL(path, `${baseUrl}/`).toString()
@@ -333,6 +370,7 @@ export class Sub2ApiAdapter implements ISiteAdapter {
       body: options.body === undefined ? undefined : JSON.stringify(options.body),
       headers: {
         Accept: "application/json",
+        ...(options.adminRequest ? { "X-Admin-UI-Request": "true" } : {}),
         ...(options.body === undefined ? {} : { "Content-Type": "application/json" }),
         Authorization: `Bearer ${normalizedToken}`
       }

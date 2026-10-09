@@ -1,7 +1,12 @@
 # adapters
 
 ## 职责
-- 统一各站点的鉴权、余额、用量与状态探测
+- 统一各站点的鉴权、余额、用量、营收与状态探测
+
+## 站点营收能力
+- `SITE_REVENUE` 目前由 One API、New API、Veloera、One Hub、Done Hub 系列适配器声明支持。
+- 营收接口使用 Bearer 访问令牌和数值 `role >= 10` 的管理员身份；返回值为当天全站扣费 quota 聚合，不传 `username` 过滤条件。
+- 其它适配器保持不支持状态，界面不会提供营收开关。
 
 ## Right.codes 订阅字段
 - Right.codes 适配器在 `getAccountBalance()` 的返回 `extra` 中附带订阅相关字段（如 `expire_time` / `daily_limit`）。
@@ -37,6 +42,7 @@
 - 自动识别：从已登录页面的 localStorage 读取 `auth_user` / `auth_token`，并用用户资料接口校验。
 - 类型探测：`/api/v1/settings/public` 返回 `code: 0`，且 `site_name`、`version`、`server_timezone` 为字符串；不要求可选的 `available_channels_enabled`，兼容 RouteX 等定制版。
 - 今日用量：`GET /api/v1/usage/dashboard/stats` → `data.today_actual_cost` / `today_input_tokens` / `today_output_tokens` / `today_requests`。
+- 站点营收：管理员通过 `GET /api/v1/user/profile` 的 `role === "admin"` 校验后，读取 `GET /api/v1/admin/dashboard/stats` 的 `data.today_actual_cost`（实际消费）；请求附带 `X-Admin-UI-Request: true`。
 - 定制站统计兼容：仅当上述接口返回 HTTP 404 时，回退到 `GET /api/v1/usage/stats?period=today`，映射 `total_actual_cost` / `total_input_tokens` / `total_output_tokens` / `total_requests`；其他错误及回退失败继续上报，不以零用量掩盖故障。
 - Key 管理：`/api/v1/keys`（GET 列表、POST 创建）及 `/api/v1/keys/:id`（GET 详情、PUT 编辑、DELETE 删除）；分页从 1 开始，默认列表加载全部页。分组来自 `/api/v1/groups/available`；今日用量通过 POST `/api/v1/usage/dashboard/api-keys-usage` 按 ID 批量查询。
 - Key 字段：`quota` 是美元总上限，0 表示无限，`quota_used` 是已用金额。映射到通用列表时附带 `quota_conversion_factor: 1`；Sub2API Key 复制时保留原值。创建有效期使用正整数 `expires_in_days`，编辑使用 RFC3339 `expires_at`，空字符串清除到期时间；未编辑的到期时间、状态与分组不发送。

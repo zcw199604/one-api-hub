@@ -207,8 +207,8 @@ export const UserPreferencesUtils = {
   validatePreferences(preferences: Partial<UserPreferences>): string[] {
     const errors: string[] = [];
 
-    if (preferences.activeTab && !['consumption', 'balance', 'subscription'].includes(preferences.activeTab)) {
-      errors.push('activeTab 必须是 "consumption" / "balance" / "subscription"');
+    if (preferences.activeTab && !['consumption', 'balance', 'revenue', 'subscription'].includes(preferences.activeTab)) {
+      errors.push('activeTab 必须是 "consumption" / "balance" / "revenue" / "subscription"');
     }
 
     if (preferences.currencyType && !['USD', 'CNY'].includes(preferences.currencyType)) {
@@ -251,6 +251,7 @@ export const UserPreferencesUtils = {
     switch (tab) {
       case 'consumption': return '今日消耗';
       case 'balance': return '总余额';
+      case 'revenue': return '今日营收';
       case 'subscription': return '订阅信息';
       default: return '未知';
     }

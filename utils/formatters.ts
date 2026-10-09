@@ -48,9 +48,10 @@ export const formatFullTime = (date: Date): string => {
 export const calculateTotalConsumption = (
   displayData: DisplaySiteData[]
 ) => {
+  const personalSites = displayData.filter(site => !site.revenueEnabled)
   return {
-    USD: parseFloat(displayData.reduce((sum, site) => sum + site.todayConsumption.USD, 0).toFixed(2)),
-    CNY: parseFloat(displayData.reduce((sum, site) => sum + site.todayConsumption.CNY, 0).toFixed(2))
+    USD: parseFloat(personalSites.reduce((sum, site) => sum + site.todayConsumption.USD, 0).toFixed(2)),
+    CNY: parseFloat(personalSites.reduce((sum, site) => sum + site.todayConsumption.CNY, 0).toFixed(2))
   }
 }
 
@@ -62,8 +63,9 @@ export const calculateConsumptionBreakdown = (
 ) => {
   type CurrencyKey = 'USD' | 'CNY'
 
-  const subscriptionSites = displayData.filter((site) => Boolean(site.subscription))
-  const payAsYouGoSites = displayData.filter((site) => !site.subscription)
+  const personalSites = displayData.filter((site) => !site.revenueEnabled)
+  const subscriptionSites = personalSites.filter((site) => Boolean(site.subscription))
+  const payAsYouGoSites = personalSites.filter((site) => !site.subscription)
 
   const sumByCurrency = (sites: DisplaySiteData[], currency: CurrencyKey) =>
     parseFloat(sites.reduce((sum, site) => sum + site.todayConsumption[currency], 0).toFixed(2))
@@ -86,9 +88,10 @@ export const calculateConsumptionBreakdown = (
 export const calculateTotalBalance = (
   displayData: DisplaySiteData[]
 ) => {
+  const personalSites = displayData.filter(site => !site.revenueEnabled)
   return {
-    USD: parseFloat(displayData.reduce((sum, site) => sum + site.balance.USD, 0).toFixed(2)),
-    CNY: parseFloat(displayData.reduce((sum, site) => sum + site.balance.CNY, 0).toFixed(2))
+    USD: parseFloat(personalSites.reduce((sum, site) => sum + site.balance.USD, 0).toFixed(2)),
+    CNY: parseFloat(personalSites.reduce((sum, site) => sum + site.balance.CNY, 0).toFixed(2))
   }
 }
 

@@ -11,6 +11,8 @@ import {
   fetchModelPricing,
   fetchSiteStatus,
   fetchTodayUsage,
+  checkAdminAccess,
+  fetchSiteRevenue,
   getOrCreateAccessToken,
   updateApiToken,
   validateAccountConnection
@@ -27,6 +29,7 @@ export class OneApiAdapter implements ISiteAdapter {
       AdapterCapability.AUTO_DETECT,
       AdapterCapability.BALANCE,
       AdapterCapability.USAGE_STATS,
+      AdapterCapability.SITE_REVENUE,
       AdapterCapability.TOKEN_MANAGEMENT,
       AdapterCapability.MODEL_LIST,
       AdapterCapability.MODEL_PRICING
@@ -154,6 +157,19 @@ export class OneApiAdapter implements ISiteAdapter {
     }
   }
 
+  async checkRevenueAccess(credentials: SiteCredentials): Promise<number> {
+    if (credentials.auth.kind !== "one-api-token") {
+      throw new Error("管理员权限检测需要账号访问令牌")
+    }
+    return checkAdminAccess(credentials.siteUrl, credentials.auth.userId, credentials.auth.accessToken)
+  }
+
+  async getSiteRevenue(credentials: SiteCredentials, timeRange: { start: number; end: number }) {
+    await this.checkRevenueAccess(credentials)
+    if (credentials.auth.kind !== "one-api-token") throw new Error("需要账号访问令牌")
+    return fetchSiteRevenue(credentials.siteUrl, credentials.auth.userId, credentials.auth.accessToken, timeRange)
+  }
+
   async getOrCreateAccessToken(credentials: SiteCredentials) {
     if (credentials.auth.kind !== "cookie") {
       throw new Error("getOrCreateAccessToken 需要 cookie 鉴权")
@@ -242,4 +258,3 @@ export class OneApiAdapter implements ISiteAdapter {
     return await fetchSiteStatus(siteUrl)
   }
 }
-
