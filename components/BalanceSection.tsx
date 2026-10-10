@@ -72,8 +72,12 @@ export default function BalanceSection({
     ? Number((revenueView.revenue.total[currencyType] - revenueView.consumption.total[currencyType]).toFixed(2))
     : 0
   const localRows = revenueView ? [...revenueView.rows, ...revenueView.consumption.rows].filter(row => row.localSince) : []
-  const isPartial = Boolean(revenueView && (revenueView.revenue.failed > 0 || revenueView.consumption.failed > 0))
   const formatAmount = (amount: number) => Math.abs(amount).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  const formatSignedAmount = (amount: number) =>
+    `${amount > 0 ? '+' : amount < 0 ? '-' : ''}${getCurrencySymbol(currencyType)}${formatAmount(amount)}`
+  const revenueDifferenceColor = !revenueView || revenueView.revenue.successful === 0 || revenueDifference === 0
+    ? 'text-gray-600'
+    : revenueDifference > 0 ? 'text-green-700 hover:text-green-800' : 'text-red-700 hover:text-red-800'
 
   // 格式化日期
   const formatDate = (timestamp: number) => {
@@ -224,17 +228,26 @@ export default function BalanceSection({
                     </p>
                   ) : (
                     <>
-                      <p className="mb-1 text-xs text-gray-500">总营收 · {revenueRange.range?.text}</p>
-                      <Tooltip className="max-w-[280px] !whitespace-normal" content="总营收按全站用户消费记录的扣费额度统计，包含管理员本人，不代表实际到账或利润；总消耗为未开启营收统计的个人账号在同一时间范围内的消耗；总差值 = 总营收 - 总消耗。时间按浏览器本地时区、含首尾日期计算。">
+                      <p className="mb-1 text-xs text-gray-500">预计净收益 · {revenueRange.range?.text}</p>
+                      <Tooltip className="max-w-[280px] !whitespace-normal" content="预计净收益 = 总流水 - 总消耗；总流水按全站用户消费记录的扣费额度统计，包含管理员本人，不代表实际到账或利润，也未扣除手续费、退款等其他成本。时间按浏览器本地时区、含首尾日期计算。">
                         <button type="button" onClick={onCurrencyToggle}
                           title={`点击切换到 ${currencyType === 'USD' ? '人民币' : '美元'}`}
-                          className="max-w-full break-all text-left text-4xl font-bold text-green-700 transition-colors hover:text-green-800">
+                          data-testid="revenue-difference"
+                          className={`max-w-full break-all text-left text-4xl font-bold transition-colors ${revenueDifferenceColor}`}>
                           {revenueView.revenue.successful > 0
-                            ? `+${getCurrencySymbol(currencyType)}${formatAmount(revenueView.revenue.total[currencyType])}`
-                            : '获取失败'}
+                            ? formatSignedAmount(revenueDifference)
+                            : '待计算'}
                         </button>
                       </Tooltip>
                       <dl className="mt-3 space-y-2">
+                        <div className="flex items-baseline justify-between gap-3">
+                          <dt className="shrink-0 text-sm text-gray-500">总流水</dt>
+                          <dd data-testid="revenue-total-flow" className="min-w-0 break-all text-right text-xl font-semibold text-green-700">
+                            {revenueView.revenue.successful > 0
+                              ? `+${getCurrencySymbol(currencyType)}${formatAmount(revenueView.revenue.total[currencyType])}`
+                              : '获取失败'}
+                          </dd>
+                        </div>
                         <div className="flex items-baseline justify-between gap-3">
                           <dt className="shrink-0 text-sm text-gray-500">总消耗</dt>
                           <dd className="flex min-w-0 justify-end">
@@ -262,16 +275,6 @@ export default function BalanceSection({
                             </Tooltip>
                           </dd>
                         </div>
-                        <div className="flex items-baseline justify-between gap-3 border-t border-gray-200/60 pt-2">
-                          <dt className="shrink-0 text-sm text-gray-700">{isPartial && revenueView.revenue.successful > 0 ? '部分差值' : '总差值'}</dt>
-                          <dd data-testid="revenue-difference" className={`min-w-0 break-all text-right text-2xl font-semibold ${
-                            revenueView.revenue.successful === 0 || revenueDifference === 0 ? 'text-gray-600' : revenueDifference > 0 ? 'text-green-700' : 'text-red-700'
-                          }`}>
-                            {revenueView.revenue.successful > 0
-                              ? `${revenueDifference > 0 ? '+' : revenueDifference < 0 ? '-' : ''}${getCurrencySymbol(currencyType)}${formatAmount(revenueDifference)}`
-                              : '待计算'}
-                          </dd>
-                        </div>
                       </dl>
                       {localRows.length > 0 && (
                         <p className="mt-2 text-xs text-gray-500">
@@ -283,7 +286,7 @@ export default function BalanceSection({
                       )}
                       {revenueView.consumption.failed > 0 && (
                         <div className="mt-2 text-xs text-amber-700">
-                          <p>{revenueView.consumption.failed} 个个人账号消耗未获取，总消耗与差值为部分统计：</p>
+                          <p>{revenueView.consumption.failed} 个个人账号消耗未获取，总消耗与预计净收益为部分统计：</p>
                           <ul className="mt-1 list-disc space-y-0.5 pl-4 break-words">
                             {revenueView.consumption.rows.filter(row => !row.amount || row.error).map(row => <li key={row.id}>{row.name}：{row.error}</li>)}
                           </ul>

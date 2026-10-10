@@ -56,7 +56,14 @@ async function main() {
     for (const tab of await page.getByRole('tab').all()) {
       assert.equal((await tab.getAttribute('class')).includes('bg-white'), (await tab.getAttribute('aria-selected')) === 'true')
     }
-    assert.match(await page.getByRole('tabpanel').innerText(), /\+¥18\.00/)
+    const panel = page.getByRole('tabpanel')
+    assert.match(await panel.innerText(), /预计净收益/)
+    assert.match(await panel.innerText(), /总流水/)
+    assert.match(await panel.innerText(), /总消耗/)
+    assert.deepEqual(await panel.locator('dt').allTextContents(), ['总流水', '总消耗'])
+    assert.equal(await panel.getByRole('button').filter({ hasText: '¥' }).first().innerText(), '+¥10.80')
+    assert.equal(await panel.getByTestId('revenue-difference').innerText(), '+¥10.80')
+    assert.equal(await panel.getByTestId('revenue-total-flow').innerText(), '+¥18.00')
     const expense = page.getByTestId('revenue-consumption')
     const difference = page.getByTestId('revenue-difference')
     assert.equal(await expense.innerText(), '-¥7.20')
